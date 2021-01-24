@@ -772,43 +772,31 @@ void write_entire_file(char *p_filename, void *data, long file_size)
     fclose(F);
 }
 
-
-// void write_n_grow(uint8_t **p, size_t *sz, uint8_t *bytesToWrite, size_t numBytes)
-// {
-//     *sz += numBytes;
-//     if (*p)
-//         *p = realloc(*p, *sz);
-//     else
-//         *p = malloc(*sz);
-    
-//     memcpy(*p + *sz - numBytes, bytesToWrite, numBytes);
-// }
-
 void zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz, int b_compress, char *path)
 {
     zip_local_file_header        localheader;
     zip_central_directory_header centralheader;
 
-    localheader.HeaderSignaturelocal = ZIP_LOCAL_FILE_HEADER_SIG;
-    localheader.VersionNeededToExtract = 20;
-    localheader.GeneralPurposeBitFlag = 0;
-    localheader.LastModFileTime = 0;
-    localheader.LastModFileDate = 0;
-    localheader.UncompressedSize = sz;
-    localheader.FileNameLength = strlen(path);
-    localheader.ExtraFieldLength = 0;
+    localheader.HeaderSignaturelocal     = ZIP_LOCAL_FILE_HEADER_SIG;
+    localheader.VersionNeededToExtract   = 20;
+    localheader.GeneralPurposeBitFlag    = 0;
+    localheader.LastModFileTime          = 0;
+    localheader.LastModFileDate          = 0;
+    localheader.UncompressedSize         = sz;
+    localheader.FileNameLength           = strlen(path);
+    localheader.ExtraFieldLength         = 0;
     
-    centralheader.HeaderSignature = ZIP_CENTRAL_DIRECTORY_HEADER_SIG;
-    centralheader.VersionMadeBy = 20;
+    centralheader.HeaderSignature        = ZIP_CENTRAL_DIRECTORY_HEADER_SIG;
+    centralheader.VersionMadeBy          = 20;
     centralheader.VersionNeededToExtract = 20;
-    centralheader.GeneralPurposeBitFlag = 0;
-    centralheader.LastModeFileTime = 0;
-    centralheader.LastModFileDate = 0;
-    centralheader.UncompressedSize = sz;
-    centralheader.FileNameLength = strlen(path);
-    centralheader.ExtraFieldLength = 0;
-    centralheader.FileCommentLength = 0;
-    centralheader.DiskNumberStart = 0;
+    centralheader.GeneralPurposeBitFlag  = 0;
+    centralheader.LastModeFileTime       = 0;
+    centralheader.LastModFileDate        = 0;
+    centralheader.UncompressedSize       = sz;
+    centralheader.FileNameLength         = strlen(path);
+    centralheader.ExtraFieldLength       = 0;
+    centralheader.FileCommentLength      = 0;
+    centralheader.DiskNumberStart        = 0;
     centralheader.InternalFileAttributes = 0;
     centralheader.ExternalFileAttributes = 0;
 
@@ -995,36 +983,6 @@ zip_entry zip_parse_next_file(zip_parsing_state *zs, char *only_unpack_this_file
             b_done = 1;
     }
 
-    z.p_mem = 0;
-    return z;
-}
-
-zip_entry fetch_zipped_file_by_name(void *p_mem, size_t zip_sz, char *p_filename)
-{
-    zip_entry z; z.p_mem = 0;
-    zip_parsing_state zs;
-    zip_start_parsing(&zs, p_mem, zip_sz);
-    char c[2048];
-    int i;
-
-    do
-    {
-        z = zip_parse_next_file(&zs, p_filename);
-        if (!z.p_mem) break;
-        for (i = 0; i < z.Header.FileNameLength; i++)
-            c[i] = z.FileName[i];
-        c[i] = 0;
-        if (!strncmp(c, p_filename, XRNS_MAX_NAME))
-        {
-            printf("found and pulled %s\n", p_filename);
-            return z;
-        }
-        else
-        {
-            free(z.p_mem);
-        }
-
-    } while (z.p_mem);
     z.p_mem = 0;
     return z;
 }
@@ -3874,7 +3832,10 @@ double CurveSample
                 b1 =  1.0f;                
             }
 
-            InterpolatedVal = B + H * (b0 + b1 * pow((a0 + a1 * (ProposedNewPosition - Pos0) / (Pos1 - Pos0)), 1.0f + 16.0f * pow(fabsf(Bez), 1.333f)));
+            double Base  = a0 + a1 * (ProposedNewPosition - Pos0) / (Pos1 - Pos0);
+            double Power = 1.0f + 16.0f * pow(fabsf(Bez), 1.333f);
+
+            InterpolatedVal = B + H * (b0 + b1 * pow(Base, Power));
         }
     }
     else if (Desc->CurveType == XRNS_CURVE_TYPE_CURVES)
