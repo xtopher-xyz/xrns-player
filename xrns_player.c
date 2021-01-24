@@ -511,6 +511,55 @@ xml_res xml_parse_one_char(xml_ctx *g)
 /* ====================================================================================================================
  * ====================================================================================================================
  * ====================================================================================================================
+ * Memory Tools
+ * ====================================================================================================================
+ */
+
+typedef struct
+{
+    void    *Memory;
+    size_t   CurrentSize;
+    size_t   MaxSize;
+} xrns_growing_buffer;
+
+void xrns_growing_buffer_init(xrns_growing_buffer *Buf, size_t Sz)
+{
+    Buf->MaxSize     = Sz;
+    Buf->CurrentSize = 0u;
+    Buf->Memory      = malloc(Sz);
+}
+    
+void xrns_growing_buffer_append(xrns_growing_buffer *Buf, void *Mem, size_t Sz)
+{
+    while (Buf->MaxSize < Buf->CurrentSize + Sz)
+    {
+        Buf->MaxSize *= 2;
+        Buf->Memory = realloc(Buf->Memory, Buf->MaxSize);
+    }
+
+    memcpy((char *) Buf->Memory + Buf->CurrentSize, Mem, Sz);
+    Buf->CurrentSize += Sz;
+}
+
+void xrns_magic_write_int(xrns_growing_buffer *Buf, int Value, int Offset)
+{
+    while (Offset * sizeof(int) >= Buf->MaxSize)
+    {
+        Buf->MaxSize *= 2;
+        Buf->Memory = realloc(Buf->Memory, Buf->MaxSize);
+    }
+
+    ((int*)Buf->Memory)[Offset] = Value;
+}
+
+void xrns_growing_buffer_free(xrns_growing_buffer *Buf)
+{
+    free(Buf->Memory);
+}
+
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
  * ZIP File Parsing & Writing
  * ====================================================================================================================
  */
@@ -601,11 +650,9 @@ typedef struct
 
 typedef struct
 {
-    uint8_t *locals;
-    size_t   locals_len;
-    uint8_t *centrals;
-    size_t   centrals_len;    
-    int      total_num_files;
+    xrns_growing_buffer Locals;
+    xrns_growing_buffer Centrals;
+    int                 total_num_files;
 } zip_file_write_context;
 
 typedef struct
@@ -684,20 +731,13 @@ static inline uint32_t zip_sig(uint8_t *z)
     return *((uint32_t *) z);
 }
 
-void zip_start_parsing(zip_parsing_state *zs, uint8_t *p_zip, size_t zip_sz)
+uint8_t *unzip_single_file(uint8_t *DeflateStream, uint8_t *Dest, mz_ulong *CompressedSize, mz_ulong *UncompressedSize)
 {
-    zs->base_zip = p_zip;
-    zs->pzip     = p_zip;
-    zs->zip_sz   = zip_sz;
-}
-
-uint8_t *unzip_single_file(uint8_t *p_deflate_stream, uint8_t *p_dest, mz_ulong *compressed_size, mz_ulong *uncompressed_size)
-{
-    if (MZ_OK != mz_uncompress_skip_header(p_dest, uncompressed_size, p_deflate_stream, *compressed_size))
+    if (MZ_OK != mz_uncompress_skip_header(Dest, UncompressedSize, DeflateStream, *CompressedSize))
     {
         return NULL;
     }
-    return p_dest;
+    return Dest;
 }
 
 uint8_t *unzip_single_file_allocate(uint8_t *p_deflate_stream, mz_ulong *compressed_size, mz_ulong *uncompressed_size)
@@ -711,12 +751,17 @@ uint8_t *unzip_single_file_allocate(uint8_t *p_deflate_stream, mz_ulong *compres
     return p_out_mem;
 }
 
+void zip_start_parsing(zip_parsing_state *zs, uint8_t *p_zip, size_t zip_sz)
+{
+    zs->base_zip = p_zip;
+    zs->pzip     = p_zip;
+    zs->zip_sz   = zip_sz;
+}
+
 void zip_start_writing(zip_file_write_context *ctx)
 {
-    ctx->locals          = 0;
-    ctx->locals_len      = 0;
-    ctx->centrals        = 0;
-    ctx->centrals_len    = 0;
+    xrns_growing_buffer_init(&ctx->Locals,   1 << 19);
+    xrns_growing_buffer_init(&ctx->Centrals, 1 << 19);
     ctx->total_num_files = 0;
 }
 
@@ -727,16 +772,17 @@ void write_entire_file(char *p_filename, void *data, long file_size)
     fclose(F);
 }
 
-void write_n_grow(uint8_t **p, size_t *sz, uint8_t *bytesToWrite, size_t numBytes)
-{
-    *sz += numBytes;
-    if (*p)
-        *p = realloc(*p, *sz);
-    else
-        *p = malloc(*sz);
+
+// void write_n_grow(uint8_t **p, size_t *sz, uint8_t *bytesToWrite, size_t numBytes)
+// {
+//     *sz += numBytes;
+//     if (*p)
+//         *p = realloc(*p, *sz);
+//     else
+//         *p = malloc(*sz);
     
-    memcpy(*p + *sz - numBytes, bytesToWrite, numBytes);
-}
+//     memcpy(*p + *sz - numBytes, bytesToWrite, numBytes);
+// }
 
 void zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz, int b_compress, char *path)
 {
@@ -770,7 +816,7 @@ void zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz, int b_
     centralheader.CRC32 = localheader.CRC32;
     ctx->total_num_files++;
 
-    centralheader.RelativeOffsetOfLocalHeader = ctx->locals_len;
+    centralheader.RelativeOffsetOfLocalHeader = ctx->Locals.CurrentSize;
 
     if (b_compress)
     {
@@ -780,53 +826,207 @@ void zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz, int b_
         compressed_sz = compressBound(sz);
         Compressed = malloc(compressed_sz);
         compress(Compressed, &compressed_sz, mem, sz);
-        localheader.CompressionMethod = 8;                  centralheader.CompressionMethod = localheader.CompressionMethod;
+
+        localheader.CompressionMethod   = 8;
+        centralheader.CompressionMethod = 8;
+
         /* take off the annoying header and the checksum at the end */
-        localheader.CompressedSize = compressed_sz - 2 - 4; centralheader.CompressedSize = localheader.CompressedSize;
+        localheader.CompressedSize   = compressed_sz - 2 - 4;
+        centralheader.CompressedSize = compressed_sz - 2 - 4;
         
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) &localheader,   sizeof(zip_local_file_header));
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) path,           strlen(path));
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) Compressed + 2, localheader.CompressedSize);
+        xrns_growing_buffer_append(&ctx->Locals, &localheader,   sizeof(zip_local_file_header));
+        xrns_growing_buffer_append(&ctx->Locals, path,           strlen(path));
+        xrns_growing_buffer_append(&ctx->Locals, Compressed + 2, localheader.CompressedSize);
 
         free(Compressed);
     }
     else
     {
-        localheader.CompressionMethod = 0; centralheader.CompressionMethod = localheader.CompressionMethod;
-        localheader.CompressedSize = sz;   centralheader.CompressedSize = localheader.CompressedSize;
+        localheader.CompressionMethod   = 0;
+        centralheader.CompressionMethod = 0;
+        localheader.CompressedSize      = sz;
+        centralheader.CompressedSize    = sz;
 
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) &localheader,   sizeof(zip_local_file_header));
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) path,           strlen(path));
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) mem,            sz);
+        xrns_growing_buffer_append(&ctx->Locals, &localheader,   sizeof(zip_local_file_header));
+        xrns_growing_buffer_append(&ctx->Locals, path,           strlen(path));
+        xrns_growing_buffer_append(&ctx->Locals, mem,            sz);
     }
 
-    write_n_grow(&ctx->centrals, &ctx->centrals_len, (uint8_t *) &centralheader, sizeof(zip_central_directory_header));
-    write_n_grow(&ctx->centrals, &ctx->centrals_len, (uint8_t *) path,           strlen(path));
+    xrns_growing_buffer_append(&ctx->Centrals, &centralheader, sizeof(zip_central_directory_header));
+    xrns_growing_buffer_append(&ctx->Centrals, path,           strlen(path));
 }
 
 void zip_finish_writing_and_save(zip_file_write_context *ctx, char *p_filename)
 {
-    uint8_t *mem = 0;
-    size_t   len = 0;
+    xrns_growing_buffer ZIP;
+    xrns_growing_buffer_init(&ZIP, (1 << 24));
 
-    write_n_grow(&mem, &len, ctx->locals,   ctx->locals_len);
-    write_n_grow(&mem, &len, ctx->centrals, ctx->centrals_len);
+    xrns_growing_buffer_append(&ZIP, ctx->Locals.Memory, ctx->Locals.CurrentSize);
+    xrns_growing_buffer_append(&ZIP, ctx->Centrals.Memory, ctx->Centrals.CurrentSize);
 
     zip_end_of_central_directory_record footer;
-    footer.Signature = ZIP_END_OF_CENTRAL_DIRECTORY_SIG;
-    footer.NumberOfThisDisk = 0;
-    footer.NumberOfThisDiskWStart = 0;
-    footer.TotalEntriesOnThisDisk = ctx->total_num_files;
-    footer.TotalEntriesOnInCD = ctx->total_num_files;
-    footer.SizeOfCentralDirectory = ctx->centrals_len;
-    footer.OffsetOfStartOfCentralEtcEtc = ctx->locals_len;
-    footer.ZIPFileCommentLength = 0;
 
-    write_n_grow(&mem, &len, (uint8_t *) &footer, sizeof(zip_end_of_central_directory_record));
-    write_entire_file(p_filename, mem, len);
-    free(ctx->locals);
-    free(ctx->centrals);
-    free(mem);
+    footer.Signature                           = ZIP_END_OF_CENTRAL_DIRECTORY_SIG;
+    footer.NumberOfThisDisk                    = 0;
+    footer.NumberOfThisDiskWStart              = 0;
+    footer.TotalEntriesOnThisDisk              = ctx->total_num_files;
+    footer.TotalEntriesOnInCD                  = ctx->total_num_files;
+    footer.SizeOfCentralDirectory              = ctx->Centrals.CurrentSize;
+    footer.OffsetOfStartOfCentralEtcEtc        = ctx->Locals.CurrentSize;
+    footer.ZIPFileCommentLength                = 0;
+
+    xrns_growing_buffer_append(&ZIP, &footer, sizeof(footer));
+    write_entire_file(p_filename, ZIP.Memory, ZIP.CurrentSize);
+    
+    xrns_growing_buffer_free(&ZIP);
+    xrns_growing_buffer_free(&ctx->Locals);
+    xrns_growing_buffer_free(&ctx->Centrals);
+}
+
+/* Return the file in a buffer, decompressing if nessescary.
+ * Caller should free the p_mem pointer when finished.
+ * p_mem is 0 if anything went wrong.
+ */
+zip_entry zip_parse_next_file(zip_parsing_state *zs, char *only_unpack_this_filename)
+{
+    zip_entry z;
+    z.p_mem = 0;
+    z.b_filename_matched = 0;
+
+    int b_done = 0;
+
+    while (!b_done)
+    {
+        uint8_t *p_out_mem = 0;
+        char c[XRNS_MAX_NAME];
+
+        switch(zip_sig(zs->pzip)) {
+        case ZIP_LOCAL_FILE_HEADER_SIG:
+        {
+            zip_local_file_header lfh = *((zip_local_file_header *) zs->pzip);
+            zs->pzip += zip_local_file_header_size(zs->pzip, c);
+
+            if (!lfh.CompressedSize && !lfh.CompressionMethod && !(lfh.GeneralPurposeBitFlag & (1u << 3)))
+            {
+                /* totally blank thing */
+                continue;
+            }
+
+            if (lfh.CompressionMethod == 0)
+            {
+                /* These will be the samples, FLAC already compressed them
+                p_out_mem = malloc(lfh.UncompressedSize);
+                memcpy(p_out_mem, zs->pzip, lfh.UncompressedSize);
+                 */
+                p_out_mem = zs->pzip;
+            }
+
+            if (lfh.CompressionMethod == 8)
+            {
+                /* Almost sure to be the Song.xml file. */
+
+                /* If we don't have the size, we have to unzip it to
+                 * reliably skip through the file. If we *do* have the
+                 * size, then we see if the filename filter can save us
+                 * the hassle.
+                 */
+                if (lfh.CompressedSize == 0 || lfh.UncompressedSize == 0)
+                {
+                    z.p_mem = 0;
+                    return z;
+                }
+
+                if (!only_unpack_this_filename || !strcmp(only_unpack_this_filename, c))
+                {
+                    mz_ulong CompressedSize = 0;
+                    mz_ulong UncompressedSize = 0;
+
+                    CompressedSize = (mz_ulong) lfh.CompressedSize;
+                    UncompressedSize = (mz_ulong) lfh.UncompressedSize;
+
+                    p_out_mem =
+                    unzip_single_file_allocate(
+                        zs->pzip,
+                        &CompressedSize,
+                        &UncompressedSize
+                        );
+
+                    lfh.CompressedSize = (uint32_t) CompressedSize;
+                    lfh.UncompressedSize = (uint32_t) UncompressedSize;
+
+                    z.b_filename_matched = !!(only_unpack_this_filename);
+                }
+            }
+
+            zs->pzip += lfh.CompressedSize;
+
+            if (lfh.GeneralPurposeBitFlag & (1u << 3))
+            {
+                zip_data_descriptor zdd = *((zip_data_descriptor *) zs->pzip);
+                zs->pzip += ZIP_DATA_DESCRIPTOR_SZ;
+            }
+
+            z.p_mem = p_out_mem;
+            z.Header = lfh;
+            strcpy(z.FileName, c);
+            return z;
+        }
+        case ZIP_CENTRAL_DIRECTORY_HEADER_SIG:
+        {
+            zip_central_directory_header cdh = *((zip_central_directory_header *) zs->pzip);
+            zs->pzip += zip_central_directory_header_size(zs->pzip);
+            break;
+        }
+        case ZIP_END_OF_CENTRAL_DIRECTORY_SIG:
+        {
+            zip_end_of_central_directory_record eofcdr = *((zip_end_of_central_directory_record *) zs->pzip);
+            zs->pzip += zip_end_of_central_directory_record_size(zs->pzip);
+            break;
+        }
+        default:
+        {
+            printf("Found something unknown in the ZIP file (sig 0x%x).\n", zip_sig(zs->pzip));
+            zs->pzip++; /* not ideal, but occasionally I see ZIP files with completely random empty padding... */
+            break;
+        }
+        }
+
+        if (zs->pzip - zs->base_zip >= zs->zip_sz)
+            b_done = 1;
+    }
+
+    z.p_mem = 0;
+    return z;
+}
+
+zip_entry fetch_zipped_file_by_name(void *p_mem, size_t zip_sz, char *p_filename)
+{
+    zip_entry z; z.p_mem = 0;
+    zip_parsing_state zs;
+    zip_start_parsing(&zs, p_mem, zip_sz);
+    char c[2048];
+    int i;
+
+    do
+    {
+        z = zip_parse_next_file(&zs, p_filename);
+        if (!z.p_mem) break;
+        for (i = 0; i < z.Header.FileNameLength; i++)
+            c[i] = z.FileName[i];
+        c[i] = 0;
+        if (!strncmp(c, p_filename, XRNS_MAX_NAME))
+        {
+            printf("found and pulled %s\n", p_filename);
+            return z;
+        }
+        else
+        {
+            free(z.p_mem);
+        }
+
+    } while (z.p_mem);
+    z.p_mem = 0;
+    return z;
 }
 
 /* ====================================================================================================================
@@ -1013,150 +1213,6 @@ void FreePooledThreads(pooled_threads_ctx *PooledThreads)
     free(PooledThreads->Relax);
     free(PooledThreads->Threads);
     free(PooledThreads);
-}
-
-typedef struct
-{
-    void    *Memory;
-    size_t   CurrentSize;
-    size_t   MaxSize;
-} xrns_growing_buffer;
-
-void xrns_growing_buffer_init(xrns_growing_buffer *Buf, size_t Sz)
-{
-    Buf->MaxSize     = Sz;
-    Buf->CurrentSize = 0u;
-    Buf->Memory      = malloc(Sz);
-}
-    
-void xrns_growing_buffer_append(xrns_growing_buffer *Buf, void *Mem, size_t Sz)
-{
-    while (Buf->MaxSize < Buf->CurrentSize + Sz)
-    {
-        Buf->MaxSize *= 2;
-        Buf->Memory = realloc(Buf->Memory, Buf->MaxSize);
-    }
-
-    memcpy((char *) Buf->Memory + Buf->CurrentSize, Mem, Sz);
-    Buf->CurrentSize += Sz;
-}
-
-void xrns_magic_write_int(xrns_growing_buffer *Buf, int Value, int Offset)
-{
-    while (Offset * sizeof(int) >= Buf->MaxSize)
-    {
-        Buf->MaxSize *= 2;
-        Buf->Memory = realloc(Buf->Memory, Buf->MaxSize);
-    }
-
-    ((int*)Buf->Memory)[Offset] = Value;
-}
-
-void xrns_growing_buffer_free(xrns_growing_buffer *Buf)
-{
-    free(Buf->Memory);
-}
-
-typedef struct 
-{
-    xrns_growing_buffer EnvelopesPerTrackPerPattern;
-    int          RenoiseVersion;
-    unsigned int NumTracks;
-    unsigned int NumInstruments;
-    unsigned int PatternSequenceLength;
-    unsigned int NumPatterns;
-    unsigned int NumSamplesPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
-    unsigned int NumSampleSplitMapsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
-    unsigned int NumModulationSetsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
-    unsigned int NumSliceRegionsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
-    unsigned int NumEffectUnitsPerTrack[XRNS_MAX_NUM_TRACKS];
-    unsigned int NumEnvelopesPerTrack[XRNS_MAX_NUM_TRACKS];
-} xrns_file_counts;
-
-
-// @Optimization: Remove this conditional.
-#define XRNS_ACCESS_STEREO_SAMPLE(x) ((x >= 0 && x < MaxLengthSamples*2) ? pcm[x] : 0)
-#define XRNS_ACCESS_MONO_SAMPLE(x) ((x >= 0 && x < MaxLengthSamples) ? pcm[x] : 0)
-
-typedef struct
-{
-    float Left;
-    float Right;
-} xrns_panning_gains;
-
-typedef struct
-{
-    float Val;
-    float Target;
-    float alpha;
-} LerpFloat;
-
-void ResetLerp(LerpFloat *L, float Val, float alpha)
-{
-    L->Val    = Val;
-    L->Target = Val;
-    L->alpha  = alpha;
-}
-
-void RunLerp(LerpFloat *L)
-{
-    if (fabsf(L->Val - L->Target) < 1.0e-6)
-    {
-        L->Val = L->Target;
-    }
-
-    L->Val = L->Val * L->alpha + L->Target * (1.0f - L->alpha);
-}
-
-/* Panning law for the panning column is log: 3.0 + 10.0 * log10(xx/128)
- * where xx goes from 0 to 128 (all Left to all Right).
- *
- * Special case for xx == 64, dead center, we force the gains to be 1.0 and 1.0.
- * 
- */
-xrns_panning_gains PanningGainFromZeroToOne(float step)
-{
-    xrns_panning_gains g;
-    if (step < 1e-6f)
-    {
-        g.Left  = 1.4125f;
-        g.Right = 0.0f;
-        return g;
-    }
-    else if (fabsf(step - 0.5f) < 1e-6f)
-    {
-        g.Left  = 1.0f;
-        g.Right = 1.0f;
-        return g;
-    }
-    else if (fabsf(step - 1.0f) < 1e-6f)
-    {
-        g.Left  = 0.0f;
-        g.Right = 1.4125f;
-        return g;
-    }
-    else
-    {
-        g.Left  = 3.0f + 10.0f * log10f(1.0f - step);
-        g.Right = 3.0f + 10.0f * log10f(step);
-        g.Left  = powf(10.0f, g.Left/20.0f);
-        g.Right = powf(10.0f, g.Right/20.0f);
-        return g;
-    }
-}
-
-/* 0x00 = Left 
- * 0x40 = Center
- * 0x80 = Right
- */
-xrns_panning_gains PanningGainFromColNumber(float step)
-{
-    return PanningGainFromZeroToOne(step/128.0f);
-}
-
-xrns_panning_gains PanningGainFromNeg1To1(float step)
-{
-    return PanningGainFromZeroToOne((step + 1.0f)/2.0f);
 }
 
 int EffectTypeIdxFromEffectType(char *c)
@@ -1469,6 +1525,22 @@ int xmlcopy(char *a, char *b)
     return 1;
 }
 
+typedef struct 
+{
+    xrns_growing_buffer EnvelopesPerTrackPerPattern;
+    int          RenoiseVersion;
+    unsigned int NumTracks;
+    unsigned int NumInstruments;
+    unsigned int PatternSequenceLength;
+    unsigned int NumPatterns;
+    unsigned int NumSamplesPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
+    unsigned int NumSampleSplitMapsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
+    unsigned int NumModulationSetsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
+    unsigned int NumSliceRegionsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
+    unsigned int NumEffectUnitsPerTrack[XRNS_MAX_NUM_TRACKS];
+    unsigned int NumEnvelopesPerTrack[XRNS_MAX_NUM_TRACKS];
+} xrns_file_counts;
+
 #pragma pack(push, 1)
 typedef struct
 {
@@ -1718,151 +1790,12 @@ typedef struct
     unsigned int                  TotalColumns;
 } xrns_document;
 
-/* Return the file in a buffer, decompressing if nessescary.
- * Caller should free the p_mem pointer when finished.
- * p_mem is 0 if anything went wrong.
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
+ * 
+ * ====================================================================================================================
  */
-zip_entry zip_parse_next_file(zip_parsing_state *zs, char *only_unpack_this_filename)
-{
-    zip_entry z;
-    z.p_mem = 0;
-    z.b_filename_matched = 0;
-
-    int b_done = 0;
-
-    while (!b_done)
-    {
-        uint8_t *p_out_mem = 0;
-        char c[XRNS_MAX_NAME];
-
-        switch(zip_sig(zs->pzip)) {
-        case ZIP_LOCAL_FILE_HEADER_SIG:
-        {
-            zip_local_file_header lfh = *((zip_local_file_header *) zs->pzip);
-            zs->pzip += zip_local_file_header_size(zs->pzip, c);
-
-            if (!lfh.CompressedSize && !lfh.CompressionMethod && !(lfh.GeneralPurposeBitFlag & (1u << 3)))
-            {
-                /* totally blank thing */
-                continue;
-            }
-
-            if (lfh.CompressionMethod == 0)
-            {
-                /* These will be the samples, FLAC already compressed them
-                p_out_mem = malloc(lfh.UncompressedSize);
-                memcpy(p_out_mem, zs->pzip, lfh.UncompressedSize);
-                 */
-                p_out_mem = zs->pzip;
-            }
-
-            if (lfh.CompressionMethod == 8)
-            {
-                /* Almost sure to be the Song.xml file. */
-
-                /* If we don't have the size, we have to unzip it to
-                 * reliably skip through the file. If we *do* have the
-                 * size, then we see if the filename filter can save us
-                 * the hassle.
-                 */
-                if (lfh.CompressedSize == 0 || lfh.UncompressedSize == 0)
-                {
-                    z.p_mem = 0;
-                    return z;
-                }
-
-                if (!only_unpack_this_filename || !strcmp(only_unpack_this_filename, c))
-                {
-                    mz_ulong CompressedSize = 0;
-                    mz_ulong UncompressedSize = 0;
-
-                    CompressedSize = (mz_ulong) lfh.CompressedSize;
-                    UncompressedSize = (mz_ulong) lfh.UncompressedSize;
-
-                    p_out_mem =
-                    unzip_single_file_allocate(
-                        zs->pzip,
-                        &CompressedSize,
-                        &UncompressedSize
-                        );
-
-                    lfh.CompressedSize = (uint32_t) CompressedSize;
-                    lfh.UncompressedSize = (uint32_t) UncompressedSize;
-
-                    z.b_filename_matched = !!(only_unpack_this_filename);
-                }
-            }
-
-            zs->pzip += lfh.CompressedSize;
-
-            if (lfh.GeneralPurposeBitFlag & (1u << 3))
-            {
-                zip_data_descriptor zdd = *((zip_data_descriptor *) zs->pzip);
-                zs->pzip += ZIP_DATA_DESCRIPTOR_SZ;
-            }
-
-            z.p_mem = p_out_mem;
-            z.Header = lfh;
-            strcpy(z.FileName, c);
-            return z;
-        }
-        case ZIP_CENTRAL_DIRECTORY_HEADER_SIG:
-        {
-            zip_central_directory_header cdh = *((zip_central_directory_header *) zs->pzip);
-            zs->pzip += zip_central_directory_header_size(zs->pzip);
-            break;
-        }
-        case ZIP_END_OF_CENTRAL_DIRECTORY_SIG:
-        {
-            zip_end_of_central_directory_record eofcdr = *((zip_end_of_central_directory_record *) zs->pzip);
-            zs->pzip += zip_end_of_central_directory_record_size(zs->pzip);
-            break;
-        }
-        default:
-        {
-            printf("Found something unknown in the ZIP file (sig 0x%x).\n", zip_sig(zs->pzip));
-            zs->pzip++; /* not ideal, but occasionally I see ZIP files with completely random empty padding... */
-            break;
-        }
-        }
-
-        if (zs->pzip - zs->base_zip >= zs->zip_sz)
-            b_done = 1;
-    }
-
-    z.p_mem = 0;
-    return z;
-}
-
-zip_entry fetch_zipped_file_by_name(void *p_mem, size_t zip_sz, char *p_filename)
-{
-    zip_entry z; z.p_mem = 0;
-    zip_parsing_state zs;
-    zip_start_parsing(&zs, p_mem, zip_sz);
-    char c[2048];
-    int i;
-
-    do
-    {
-        z = zip_parse_next_file(&zs, p_filename);
-        if (!z.p_mem) break;
-        for (i = 0; i < z.Header.FileNameLength; i++)
-            c[i] = z.FileName[i];
-        c[i] = 0;
-        if (!strncmp(c, p_filename, XRNS_MAX_NAME))
-        {
-            printf("found and pulled %s\n", p_filename);
-            return z;
-        }
-        else
-        {
-            free(z.p_mem);
-        }
-
-    } while (z.p_mem);
-    z.p_mem = 0;
-    return z;
-}
 
 #define XRNS_KERNAL(_x) char _x;
 typedef struct
@@ -3345,6 +3278,92 @@ int populateXRNSDocument(galloc_ctx *g, void *mem, size_t mem_sz, xrns_document 
     TracyCZoneEnd(ctx);
 
     return 1;
+}
+
+
+// @Optimization: Remove this conditional.
+#define XRNS_ACCESS_STEREO_SAMPLE(x) ((x >= 0 && x < MaxLengthSamples*2) ? pcm[x] : 0)
+#define XRNS_ACCESS_MONO_SAMPLE(x) ((x >= 0 && x < MaxLengthSamples) ? pcm[x] : 0)
+
+typedef struct
+{
+    float Left;
+    float Right;
+} xrns_panning_gains;
+
+typedef struct
+{
+    float Val;
+    float Target;
+    float alpha;
+} LerpFloat;
+
+void ResetLerp(LerpFloat *L, float Val, float alpha)
+{
+    L->Val    = Val;
+    L->Target = Val;
+    L->alpha  = alpha;
+}
+
+void RunLerp(LerpFloat *L)
+{
+    if (fabsf(L->Val - L->Target) < 1.0e-6)
+    {
+        L->Val = L->Target;
+    }
+
+    L->Val = L->Val * L->alpha + L->Target * (1.0f - L->alpha);
+}
+
+/* Panning law for the panning column is log: 3.0 + 10.0 * log10(xx/128)
+ * where xx goes from 0 to 128 (all Left to all Right).
+ *
+ * Special case for xx == 64, dead center, we force the gains to be 1.0 and 1.0.
+ * 
+ */
+xrns_panning_gains PanningGainFromZeroToOne(float step)
+{
+    xrns_panning_gains g;
+    if (step < 1e-6f)
+    {
+        g.Left  = 1.4125f;
+        g.Right = 0.0f;
+        return g;
+    }
+    else if (fabsf(step - 0.5f) < 1e-6f)
+    {
+        g.Left  = 1.0f;
+        g.Right = 1.0f;
+        return g;
+    }
+    else if (fabsf(step - 1.0f) < 1e-6f)
+    {
+        g.Left  = 0.0f;
+        g.Right = 1.4125f;
+        return g;
+    }
+    else
+    {
+        g.Left  = 3.0f + 10.0f * log10f(1.0f - step);
+        g.Right = 3.0f + 10.0f * log10f(step);
+        g.Left  = powf(10.0f, g.Left/20.0f);
+        g.Right = powf(10.0f, g.Right/20.0f);
+        return g;
+    }
+}
+
+/* 0x00 = Left 
+ * 0x40 = Center
+ * 0x80 = Right
+ */
+xrns_panning_gains PanningGainFromColNumber(float step)
+{
+    return PanningGainFromZeroToOne(step/128.0f);
+}
+
+xrns_panning_gains PanningGainFromNeg1To1(float step)
+{
+    return PanningGainFromZeroToOne((step + 1.0f)/2.0f);
 }
 
 typedef struct
