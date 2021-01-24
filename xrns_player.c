@@ -7222,7 +7222,7 @@ int run_engine
                         /* Handle panning from sources 1, 2, 3, 4 */
                         // @Optimization: Maybe don't do these every sample?
 
-                        int PostPanningValue = xstate->TrackStates[track]->CurrentPanning.Val
+                        int PostPanningValue = xstate->TrackStates[track]->CurrentPanning.Val;
 
                         xrns_panning_gains SamplePan     = PanningGainFromZeroToOne(Sample->Panning);
                         xrns_panning_gains ModulationPan = {1.0f, 1.0f};
@@ -7679,8 +7679,8 @@ int run_engine
 
         TracyCZoneN(time_ctx, "Time Walking", 1);
 
-        int          NumberOfLines           = xstate->xdoc->PatternPool[PatternIdx].NumberOfLines;
         unsigned int PatternIdx              = xstate->xdoc->PatternSequence[xstate->CurrentPatternIndex].PatternIdx;
+        int          NumberOfLines           = xstate->xdoc->PatternPool[PatternIdx].NumberOfLines;
         int bSampleIncrementWouldWrapLinePre = (xstate->CurrentSample >= xstate->LocationOfNextLine - 1.0);
         int bOnLastRow                       = (xstate->CurrentRow == NumberOfLines - 1);
         int bSampleIncrementWouldWrapLine    = (xstate->CurrentSample >= xstate->LocationOfNextLine);
