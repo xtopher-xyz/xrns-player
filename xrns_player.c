@@ -63,18 +63,29 @@
  */
 #include "miniz/miniz.c"
 
-/* Renoise defines this to be 12. Basically this is the polyphony 
- * limit for a single note column within a track. Because notes
- * have a short fadeout time no matter what, even trivial 
- * XRNS files want this to be at least 2.
- */
-#define XRNS_MAX_SAMPLERS_PER_COLUMN (12)
-
-#define XRNS_16BIT_CONVERTION        (3.0517578125e-5f)
+// Outward interfacing.
 
 /* This affects how many samplers we can tell Unity about.
  */
 #define XRNS_ACTIVE_SAMPLER_COUNT (128)
+
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
+ * Defines & XML Macros
+ * ====================================================================================================================
+ */
+
+/* Renoise defines this to be 12. Basically this is the polyphony limit for a single note column within a track. 
+ * Because notes have a short fadeout time no matter what, even trivial XRNS files want this to be at least 2.
+ */
+#define XRNS_MAX_SAMPLERS_PER_COLUMN (12)
+#define XRNS_MAX_COLUMNS_PER_TRACK (16)
+#define XRNS_MAX_NESTING_DEPTH (6)
+#define XRNS_MAX_NAME   (512)
+#define XRNS_MAX_NUM_INSTRUMENTS (255)
+#define XRNS_MAX_NUM_TRACKS      (255)
+#define XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING (12)
 
 #define XRNS_NOTE_BLANK  (0xFF)
 #define XRNS_NOTE_OFF    (0xFE)
@@ -83,14 +94,12 @@
 
 #define XRNS_MISSING_VALUE (0xFFFF)
 
-#define XRNS_PANNING_LERP (0.96f)
-
 #define XRNS_EFFECT_FILTER (0)
 #define XRNS_EFFECT_REVERB (1)
 
+/* Constants that still require further reverse-engineering to finetune. 
+ */
 #define XRNS_XFADE_MS (1)
-
-#define XRNS_MAX_COLUMNS_PER_TRACK (16)
 
 #define XRNS_STORED_EFFECT_DU  (0)
 #define XRNS_STORED_EFFECT_IO  (1)
@@ -101,8 +110,6 @@
 #define XRNS_STORED_EFFECT_VOL (6)
 #define XRNS_STORED_EFFECT_PAN (7)
 #define XRNS_STORED_EFFECT_NUM (8)
-
-#define XRNS_MAX_NESTING_DEPTH (6)
 
 #define XRNS_INTERPOLATION_NONE   (0)
 #define XRNS_INTERPOLATION_LINEAR (1)
@@ -115,8 +122,6 @@
 
 #define XRNS_FORWARD              (0)
 #define XRNS_BACKWARD             (1)
-
-#define XRNS_MAX_NAME   (512)
 
 #define XRNS_NNA_CUT      (0)
 #define XRNS_NNA_NOTEOFF  (1)
@@ -136,10 +141,6 @@
 
 #define XRNS_UNIPOLAR (0)
 #define XRNS_BIPOLAR  (1)
-
-#define Kilobytes(_amount) (_amount * 1024L)
-#define Megabytes(_amount) (Kilobytes(_amount) * 1024L)
-#define Gigabytes(_amount) (Megabytes(_amount) * 1024L)
 
 #define EFFECT_ID_0D     (0)
 #define EFFECT_ID_0U     (1)
@@ -173,9 +174,6 @@
 #define EFFECT_ID_0K    (29)
 #define EFFECT_ID_COUNT (30)
 
-#define XRNS_MAX_NUM_INSTRUMENTS (255)
-#define XRNS_MAX_NUM_TRACKS      (255)
-
 #define GAMBIT_XML_EVENT_NOTHING               (0)
 #define GAMBIT_XML_EVENT_ELEMENT_START         (1)
 #define GAMBIT_XML_EVENT_ELEMENT_END           (2)
@@ -184,6 +182,137 @@
 #define GAMBIT_XML_EVENT_ATTR_VALUE            (5)
 #define GAMBIT_XML_EVENT_EOF                   (6)
 #define GAMBIT_XML_EVENT_BROKEN                (7)
+
+#define Kilobytes(_amount) (_amount * 1024L)
+#define Megabytes(_amount) (Kilobytes(_amount) * 1024L)
+#define Gigabytes(_amount) (Megabytes(_amount) * 1024L)
+
+#define XRNS_TAGS XRNS_KERNAL(AliasPatternIndex)\
+XRNS_KERNAL(AudioPluginDevice)\
+XRNS_KERNAL(Automations)\
+XRNS_KERNAL(Envelope)\
+XRNS_KERNAL(Envelopes)\
+XRNS_KERNAL(FilterDevices)\
+XRNS_KERNAL(GlobalProperties)\
+XRNS_KERNAL(GroupTrackMixerDevice)\
+XRNS_KERNAL(Instrument)\
+XRNS_KERNAL(Instruments)\
+XRNS_KERNAL(IsActive)\
+XRNS_KERNAL(Mapping)\
+XRNS_KERNAL(MasterTrackMixerDevice)\
+XRNS_KERNAL(ModulationSet)\
+XRNS_KERNAL(ModulationSets)\
+XRNS_KERNAL(MutedTracks)\
+XRNS_KERNAL(NoteOnMapping)\
+XRNS_KERNAL(Panning)\
+XRNS_KERNAL(Parameter)\
+XRNS_KERNAL(Parameters)\
+XRNS_KERNAL(Pattern)\
+XRNS_KERNAL(PatternGroupTrack)\
+XRNS_KERNAL(PatternMasterTrack)\
+XRNS_KERNAL(Patterns)\
+XRNS_KERNAL(PatternSequence)\
+XRNS_KERNAL(PatternTrack)\
+XRNS_KERNAL(PhraseGenerator)\
+XRNS_KERNAL(PluginGenerator)\
+XRNS_KERNAL(PluginProperties)\
+XRNS_KERNAL(PostPanning)\
+XRNS_KERNAL(PostVolume)\
+XRNS_KERNAL(Sample)\
+XRNS_KERNAL(SampleEnvelopeModulationDevice)\
+XRNS_KERNAL(SampleEnvelopes)\
+XRNS_KERNAL(Samples)\
+XRNS_KERNAL(SampleSplitMap)\
+XRNS_KERNAL(SequenceEntries)\
+XRNS_KERNAL(SequenceEntry)\
+XRNS_KERNAL(SequencerGroupTrack)\
+XRNS_KERNAL(SequencerMasterTrack)\
+XRNS_KERNAL(SequencerMasterTrackDevice)\
+XRNS_KERNAL(SequencerSendTrack)\
+XRNS_KERNAL(SequencerTrack)\
+XRNS_KERNAL(SequencerTrackDevice)\
+XRNS_KERNAL(SliceMarker)\
+XRNS_KERNAL(SliceMarkers)\
+XRNS_KERNAL(Surround)\
+XRNS_KERNAL(TrackMixerDevice)\
+XRNS_KERNAL(Tracks)\
+XRNS_KERNAL(Volume)
+
+#define XRNS_SUBSET_TAGS XRNS_KERNAL(Instruments)\
+XRNS_KERNAL(Sample)\
+XRNS_KERNAL(Samples)\
+XRNS_KERNAL(PhraseGenerator)\
+XRNS_KERNAL(ModulationSet)\
+XRNS_KERNAL(SliceMarkers)\
+XRNS_KERNAL(GlobalProperties)\
+XRNS_KERNAL(Instruments)\
+XRNS_KERNAL(Patterns)\
+XRNS_KERNAL(Automations)\
+XRNS_KERNAL(Envelopes)\
+XRNS_KERNAL(Envelope)\
+XRNS_KERNAL(SequenceEntries)\
+XRNS_KERNAL(FilterDevices)\
+XRNS_KERNAL(Tracks)
+
+#define XRNS_TRACK_TAGS XRNS_KERNAL(SequencerSendTrack)\
+XRNS_KERNAL(SequencerMasterTrack)\
+XRNS_KERNAL(SequencerGroupTrack)\
+XRNS_KERNAL(TrackMixerDevice)\
+XRNS_KERNAL(MasterTrackMixerDevice)\
+XRNS_KERNAL(SequencerMasterTrackDevice)\
+XRNS_KERNAL(SequencerTrackDevice)\
+XRNS_KERNAL(GroupTrackMixerDevice)\
+XRNS_KERNAL(Volume)\
+XRNS_KERNAL(PostVolume)\
+XRNS_KERNAL(Surround)\
+XRNS_KERNAL(Panning)\
+XRNS_KERNAL(PostPanning)\
+XRNS_KERNAL(FilterDevices)\
+XRNS_KERNAL(AudioPluginDevice)\
+XRNS_KERNAL(IsActive)\
+XRNS_KERNAL(Parameters)\
+XRNS_KERNAL(Parameter)
+
+#define XRNS_INSTRUMENT_TAGS XRNS_KERNAL(Instruments)\
+XRNS_KERNAL(Instrument)\
+XRNS_KERNAL(Samples)\
+XRNS_KERNAL(Sample)\
+XRNS_KERNAL(PluginProperties)\
+XRNS_KERNAL(SampleSplitMap)\
+XRNS_KERNAL(SampleEnvelopes)\
+XRNS_KERNAL(NoteOnMapping)\
+XRNS_KERNAL(ModulationSets)\
+XRNS_KERNAL(PluginGenerator)\
+XRNS_KERNAL(GlobalProperties)\
+XRNS_KERNAL(Mapping)\
+XRNS_KERNAL(SampleEnvelopeModulationDevice)\
+XRNS_KERNAL(ModulationSet)\
+XRNS_KERNAL(SliceMarkers)\
+XRNS_KERNAL(SliceMarker)\
+XRNS_KERNAL(PhraseGenerator)\
+XRNS_KERNAL(Automations)\
+XRNS_KERNAL(Envelopes)\
+XRNS_KERNAL(Envelope)
+
+#define XRNS_TOPLEVEL_TAGS XRNS_KERNAL(Instruments)\
+XRNS_KERNAL(Patterns)\
+XRNS_KERNAL(Pattern)\
+XRNS_KERNAL(PatternTrack)\
+XRNS_KERNAL(PatternMasterTrack)\
+XRNS_KERNAL(PatternGroupTrack)\
+XRNS_KERNAL(AliasPatternIndex)\
+XRNS_KERNAL(Tracks)\
+XRNS_KERNAL(Patterns)\
+XRNS_KERNAL(SequencerGroupTrack)\
+XRNS_KERNAL(SequencerTrack)\
+XRNS_KERNAL(SequencerMasterTrack)\
+XRNS_KERNAL(PatternSequence)\
+XRNS_KERNAL(SequenceEntries)\
+XRNS_KERNAL(SequenceEntry)\
+XRNS_KERNAL(Automations)\
+XRNS_KERNAL(Envelopes)\
+XRNS_KERNAL(Envelope)\
+XRNS_KERNAL(MutedTracks)
 
 /* Pass the XML document in as a NULL terminated string at init, it must persist for
  * the duration of the parsing.
@@ -1745,133 +1874,6 @@ gambit_zip_entry gambit_fetch_zipped_file_by_name(void *p_mem, size_t zip_sz, ch
     return z;
 }
 
-#define XRNS_TAGS XRNS_KERNAL(AliasPatternIndex)\
-XRNS_KERNAL(AudioPluginDevice)\
-XRNS_KERNAL(Automations)\
-XRNS_KERNAL(Envelope)\
-XRNS_KERNAL(Envelopes)\
-XRNS_KERNAL(FilterDevices)\
-XRNS_KERNAL(GlobalProperties)\
-XRNS_KERNAL(GroupTrackMixerDevice)\
-XRNS_KERNAL(Instrument)\
-XRNS_KERNAL(Instruments)\
-XRNS_KERNAL(IsActive)\
-XRNS_KERNAL(Mapping)\
-XRNS_KERNAL(MasterTrackMixerDevice)\
-XRNS_KERNAL(ModulationSet)\
-XRNS_KERNAL(ModulationSets)\
-XRNS_KERNAL(MutedTracks)\
-XRNS_KERNAL(NoteOnMapping)\
-XRNS_KERNAL(Panning)\
-XRNS_KERNAL(Parameter)\
-XRNS_KERNAL(Parameters)\
-XRNS_KERNAL(Pattern)\
-XRNS_KERNAL(PatternGroupTrack)\
-XRNS_KERNAL(PatternMasterTrack)\
-XRNS_KERNAL(Patterns)\
-XRNS_KERNAL(PatternSequence)\
-XRNS_KERNAL(PatternTrack)\
-XRNS_KERNAL(PhraseGenerator)\
-XRNS_KERNAL(PluginGenerator)\
-XRNS_KERNAL(PluginProperties)\
-XRNS_KERNAL(PostPanning)\
-XRNS_KERNAL(PostVolume)\
-XRNS_KERNAL(Sample)\
-XRNS_KERNAL(SampleEnvelopeModulationDevice)\
-XRNS_KERNAL(SampleEnvelopes)\
-XRNS_KERNAL(Samples)\
-XRNS_KERNAL(SampleSplitMap)\
-XRNS_KERNAL(SequenceEntries)\
-XRNS_KERNAL(SequenceEntry)\
-XRNS_KERNAL(SequencerGroupTrack)\
-XRNS_KERNAL(SequencerMasterTrack)\
-XRNS_KERNAL(SequencerMasterTrackDevice)\
-XRNS_KERNAL(SequencerSendTrack)\
-XRNS_KERNAL(SequencerTrack)\
-XRNS_KERNAL(SequencerTrackDevice)\
-XRNS_KERNAL(SliceMarker)\
-XRNS_KERNAL(SliceMarkers)\
-XRNS_KERNAL(Surround)\
-XRNS_KERNAL(TrackMixerDevice)\
-XRNS_KERNAL(Tracks)\
-XRNS_KERNAL(Volume)
-
-#define XRNS_SUBSET_TAGS XRNS_KERNAL(Instruments)\
-XRNS_KERNAL(Sample)\
-XRNS_KERNAL(Samples)\
-XRNS_KERNAL(PhraseGenerator)\
-XRNS_KERNAL(ModulationSet)\
-XRNS_KERNAL(SliceMarkers)\
-XRNS_KERNAL(GlobalProperties)\
-XRNS_KERNAL(Instruments)\
-XRNS_KERNAL(Patterns)\
-XRNS_KERNAL(Automations)\
-XRNS_KERNAL(Envelopes)\
-XRNS_KERNAL(Envelope)\
-XRNS_KERNAL(SequenceEntries)\
-XRNS_KERNAL(FilterDevices)\
-XRNS_KERNAL(Tracks)
-
-#define XRNS_TRACK_TAGS XRNS_KERNAL(SequencerSendTrack)\
-XRNS_KERNAL(SequencerMasterTrack)\
-XRNS_KERNAL(SequencerGroupTrack)\
-XRNS_KERNAL(TrackMixerDevice)\
-XRNS_KERNAL(MasterTrackMixerDevice)\
-XRNS_KERNAL(SequencerMasterTrackDevice)\
-XRNS_KERNAL(SequencerTrackDevice)\
-XRNS_KERNAL(GroupTrackMixerDevice)\
-XRNS_KERNAL(Volume)\
-XRNS_KERNAL(PostVolume)\
-XRNS_KERNAL(Surround)\
-XRNS_KERNAL(Panning)\
-XRNS_KERNAL(PostPanning)\
-XRNS_KERNAL(FilterDevices)\
-XRNS_KERNAL(AudioPluginDevice)\
-XRNS_KERNAL(IsActive)\
-XRNS_KERNAL(Parameters)\
-XRNS_KERNAL(Parameter)
-
-#define XRNS_INSTRUMENT_TAGS XRNS_KERNAL(Instruments)\
-XRNS_KERNAL(Instrument)\
-XRNS_KERNAL(Samples)\
-XRNS_KERNAL(Sample)\
-XRNS_KERNAL(PluginProperties)\
-XRNS_KERNAL(SampleSplitMap)\
-XRNS_KERNAL(SampleEnvelopes)\
-XRNS_KERNAL(NoteOnMapping)\
-XRNS_KERNAL(ModulationSets)\
-XRNS_KERNAL(PluginGenerator)\
-XRNS_KERNAL(GlobalProperties)\
-XRNS_KERNAL(Mapping)\
-XRNS_KERNAL(SampleEnvelopeModulationDevice)\
-XRNS_KERNAL(ModulationSet)\
-XRNS_KERNAL(SliceMarkers)\
-XRNS_KERNAL(SliceMarker)\
-XRNS_KERNAL(PhraseGenerator)\
-XRNS_KERNAL(Automations)\
-XRNS_KERNAL(Envelopes)\
-XRNS_KERNAL(Envelope)
-
-#define XRNS_TOPLEVEL_TAGS XRNS_KERNAL(Instruments)\
-XRNS_KERNAL(Patterns)\
-XRNS_KERNAL(Pattern)\
-XRNS_KERNAL(PatternTrack)\
-XRNS_KERNAL(PatternMasterTrack)\
-XRNS_KERNAL(PatternGroupTrack)\
-XRNS_KERNAL(AliasPatternIndex)\
-XRNS_KERNAL(Tracks)\
-XRNS_KERNAL(Patterns)\
-XRNS_KERNAL(SequencerGroupTrack)\
-XRNS_KERNAL(SequencerTrack)\
-XRNS_KERNAL(SequencerMasterTrack)\
-XRNS_KERNAL(PatternSequence)\
-XRNS_KERNAL(SequenceEntries)\
-XRNS_KERNAL(SequenceEntry)\
-XRNS_KERNAL(Automations)\
-XRNS_KERNAL(Envelopes)\
-XRNS_KERNAL(Envelope)\
-XRNS_KERNAL(MutedTracks)
-
 #define XRNS_KERNAL(_x) char _x;
 typedef struct
 {
@@ -3363,10 +3365,6 @@ typedef struct
     char          bSustaining;
 } xrns_envelope_playback_state;
 
-/* Instruments can have a maximum of 12 samples playing back at once.
- */
-#define XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING (12)
-
 typedef struct
 {
     /* Envelope Positions */
@@ -3538,8 +3536,8 @@ void InitialiseSampler(xrns_sampler *Sampler)
         PlaybackState->BackPosition0  = 0.0f;
         PlaybackState->BackPosition1  = 0.0f;
     }
-    ResetLerp(&Sampler->CurrentPanning, 0x40,  XRNS_PANNING_LERP);
-    ResetLerp(&Sampler->CurrentVolume,  0x100, XRNS_PANNING_LERP);
+    ResetLerp(&Sampler->CurrentPanning, 0x40,  0.96f);
+    ResetLerp(&Sampler->CurrentVolume,  0x100, 0.96f);
 }
 
 typedef struct
@@ -6699,7 +6697,7 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                         }
 
                         // @Optimization: I've stuck the scaling factor for int to float here.
-                        const float RenoiseOutputGain = 0.5011872336272722f * XRNS_16BIT_CONVERTION;
+                        const float RenoiseOutputGain = 0.5011872336272722f * (3.0517578125e-5f);
                         float CrossFadeLevel = RenoiseOutputGain
                                              * xstate->TrackStates[xstate->xdoc->NumTracks-1]->CurrentPreVolume.Val
                                              * VolumePercent;
