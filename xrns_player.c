@@ -79,13 +79,15 @@
 /* Renoise defines this to be 12. Basically this is the polyphony limit for a single note column within a track. 
  * Because notes have a short fadeout time no matter what, even trivial XRNS files want this to be at least 2.
  */
-#define XRNS_MAX_SAMPLERS_PER_COLUMN (12)
-#define XRNS_MAX_COLUMNS_PER_TRACK (16)
-#define XRNS_MAX_NESTING_DEPTH (6)
-#define XRNS_MAX_NAME   (512)
-#define XRNS_MAX_NUM_INSTRUMENTS (255)
-#define XRNS_MAX_NUM_TRACKS      (255)
-#define XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING (12)
+#define XRNS_MAX_SAMPLERS_PER_COLUMN         (12)
+#define XRNS_MAX_COLUMNS_PER_TRACK           (16)
+#define XRNS_MAX_NESTING_DEPTH                (6)
+#define XRNS_MAX_NAME                       (512)
+#define XRNS_MAX_NUM_INSTRUMENTS            (255)
+#define XRNS_MAX_NUM_TRACKS                 (255)
+#define XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING  (12)
+
+#define XRNS_XFADE_MS (1)
 
 #define XRNS_NOTE_BLANK  (0xFF)
 #define XRNS_NOTE_OFF    (0xFE)
@@ -96,10 +98,6 @@
 
 #define XRNS_EFFECT_FILTER (0)
 #define XRNS_EFFECT_REVERB (1)
-
-/* Constants that still require further reverse-engineering to finetune. 
- */
-#define XRNS_XFADE_MS (1)
 
 #define XRNS_STORED_EFFECT_DU  (0)
 #define XRNS_STORED_EFFECT_IO  (1)
@@ -173,15 +171,6 @@
 #define EFFECT_ID_ZD    (28)
 #define EFFECT_ID_0K    (29)
 #define EFFECT_ID_COUNT (30)
-
-#define GAMBIT_XML_EVENT_NOTHING               (0)
-#define GAMBIT_XML_EVENT_ELEMENT_START         (1)
-#define GAMBIT_XML_EVENT_ELEMENT_END           (2)
-#define GAMBIT_XML_EVENT_ELEMENT_SELFCLOSING   (3)
-#define GAMBIT_XML_EVENT_ATTR_NAME             (4)
-#define GAMBIT_XML_EVENT_ATTR_VALUE            (5)
-#define GAMBIT_XML_EVENT_EOF                   (6)
-#define GAMBIT_XML_EVENT_BROKEN                (7)
 
 #define Kilobytes(_amount) (_amount * 1024L)
 #define Megabytes(_amount) (Kilobytes(_amount) * 1024L)
@@ -314,59 +303,51 @@ XRNS_KERNAL(Envelopes)\
 XRNS_KERNAL(Envelope)\
 XRNS_KERNAL(MutedTracks)
 
-/* Pass the XML document in as a NULL terminated string at init, it must persist for
- * the duration of the parsing.
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
+ * XML Parsing (Yuck!)
+ * ====================================================================================================================
  */
 
-/* char *xml;
- * gambit_xml x;
- * gambit_xml_init(&x, xml);
- *
- * xml_res r;
- * while (1) {
- *   r = gambit_xml_eat_char(&x);
- *   if (r.event_type == GAMBIT_XML_EOF) break;
- *   switch(r.event_type) {
- *     case (GAMBIT_XML_???) : {}
- *   }
- *   xml++;
- * }
- */
-
-/* A single event is returned per call to gambit_xml_eat_char, and events are returned once.
- * (GAMBIT_XML_EVENT_NOTHING) is returned if no event occured.
- */
-
-/*        +-> GAMBIT_XML_EVENT_ELEMENT_START (name => "Burger")
+/*        +-> XML_EVENT_ELEMENT_START (name => "Burger")
  *        |
  *        |
- *        |          +-> GAMBIT_XML_EVENT_ELEMENT_END (value => "0.99", name => "Price")
+ *        |          +-> XML_EVENT_ELEMENT_END (value => "0.99", name => "Price")
  *        |          |
  * <Burger>          |
  * <Price>0.99</Price>
  *       |           
  *       |           
  *       |
- *       +-> GAMBIT_XML_EVENT_ELEMENT_START (xml_res->name => "Price")
+ *       +-> XML_EVENT_ELEMENT_START (xml_res->name => "Price")
  *
  * </Burger>
  *         |
  *         |
- *         +-> GAMBIT_XML_EVENT_ELEMENT_END (value => "<Price>0.99</Price>", name => "Burger")
+ *         +-> XML_EVENT_ELEMENT_END (value => "<Price>0.99</Price>", name => "Burger")
  *
- *                  +-> GAMBIT_XML_EVENT_ATTR_VALUE (value => "Large")
+ *                  +-> XML_EVENT_ATTR_VALUE (value => "Large")
  *                  |
  *                  |
  * <Meal Size="Large">
  *           |
  *           |
- *           +-> GAMBIT_XML_EVENT_ATTR_NAME (xml_res->name => "Size")
+ *           +-> XML_EVENT_ATTR_NAME (xml_res->name => "Size")
  *
  * <SingleThingy/>
  *               |
  *               |
- *               +-> GAMBIT_XML_EVENT_ELEMENT_SELFCLOSING (xml_res->name => "SingleThingy")
+ *               +-> XML_EVENT_ELEMENT_SELFCLOSING (xml_res->name => "SingleThingy")
  */
+
+#define XML_EVENT_NOTHING               (0)
+#define XML_EVENT_ELEMENT_START         (1)
+#define XML_EVENT_ELEMENT_END           (2)
+#define XML_EVENT_ELEMENT_SELFCLOSING   (3)
+#define XML_EVENT_ATTR_NAME             (4)
+#define XML_EVENT_ATTR_VALUE            (5)
+#define XML_EVENT_EOF                   (6)
 
 typedef struct
 {
@@ -377,32 +358,32 @@ typedef struct
 
 typedef struct
 {
-    xml_res       r;
-    char          attribute_side;
-    char         *xml;
-    char         *stack;
-    char         *stack_val;
-    char         *attribute;
-    char         *value;
-    char          b_parsing_attribute;
-} gambit_xml;
+    xml_res  r;
+    char     attribute_side;
+    char    *xml;
+    char    *stack;
+    char    *stack_val;
+    char    *attribute;
+    char    *value;
+    char     b_parsing_attribute;
+} xml;
 
-void gambit_xml_init(gambit_xml *g, char *xml)
+void xml_init(xml *g, char *xml)
 {
     int i;
-    for (i = 0; i < sizeof(gambit_xml); i++)
+    for (i = 0; i < sizeof(xml); i++)
         ((char *)g)[i] = 0;
 
     g->xml = xml;
 }
 
-xml_res gambit_xml_parse_one_char(gambit_xml *g)
+xml_res xml_parse_one_char(xml *g)
 {
     char *xmlptr = g->xml;
 
-    g->r.event_type = GAMBIT_XML_EVENT_NOTHING;
+    g->r.event_type = XML_EVENT_NOTHING;
 
-    while (g->r.event_type == GAMBIT_XML_EVENT_NOTHING)
+    while (g->r.event_type == XML_EVENT_NOTHING)
     {   
         char c = *xmlptr;
 
@@ -410,7 +391,7 @@ xml_res gambit_xml_parse_one_char(gambit_xml *g)
         {
             case '\0':
             {
-                g->r.event_type = GAMBIT_XML_EVENT_EOF;
+                g->r.event_type = XML_EVENT_EOF;
                 goto xmlexit;           
             }
             case '<':
@@ -436,7 +417,7 @@ xml_res gambit_xml_parse_one_char(gambit_xml *g)
             {
                 if (xmlptr[-1] == '/')
                 {
-                    g->r.event_type = GAMBIT_XML_EVENT_ELEMENT_SELFCLOSING;
+                    g->r.event_type = XML_EVENT_ELEMENT_SELFCLOSING;
                     g->r.name       = g->stack;
                     g->r.value      = 0;
                 }
@@ -444,13 +425,13 @@ xml_res gambit_xml_parse_one_char(gambit_xml *g)
                 {
                     if (g->stack[0] == '/')
                     { 
-                        g->r.event_type = GAMBIT_XML_EVENT_ELEMENT_END;
+                        g->r.event_type = XML_EVENT_ELEMENT_END;
                         g->r.name       = g->stack + 1;
                         g->r.value      = g->stack_val;
                     }
                     else 
                     {
-                        g->r.event_type = GAMBIT_XML_EVENT_ELEMENT_START;
+                        g->r.event_type = XML_EVENT_ELEMENT_START;
                         g->r.name       = g->stack;
                         g->stack_val    = xmlptr + 1;
                     }
@@ -462,7 +443,7 @@ xml_res gambit_xml_parse_one_char(gambit_xml *g)
 
                 if (!xmlptr)
                 {
-                    g->r.event_type = GAMBIT_XML_EVENT_EOF;
+                    g->r.event_type = XML_EVENT_EOF;
                     goto xmlexit;
                 }
 
@@ -483,7 +464,7 @@ xml_res gambit_xml_parse_one_char(gambit_xml *g)
                 }
                 else if (g->attribute_side == 2)
                 {
-                    g->r.event_type   = GAMBIT_XML_EVENT_ATTR_VALUE;
+                    g->r.event_type   = XML_EVENT_ATTR_VALUE;
                     g->r.value        = g->attribute;
                     g->attribute_side = 0;
                 }
@@ -494,7 +475,7 @@ xml_res gambit_xml_parse_one_char(gambit_xml *g)
             {
                 if (g->b_parsing_attribute)
                 {
-                    g->r.event_type = GAMBIT_XML_EVENT_ATTR_NAME;
+                    g->r.event_type = XML_EVENT_ATTR_NAME;
                     g->r.name       = g->attribute;
                     g->b_parsing_attribute = 0;
                     g->attribute_side = 1;
@@ -505,7 +486,7 @@ xml_res gambit_xml_parse_one_char(gambit_xml *g)
             {
                 if (c == ' ')
                 {
-                    g->r.event_type = GAMBIT_XML_EVENT_ELEMENT_START;
+                    g->r.event_type = XML_EVENT_ELEMENT_START;
                     g->r.name       = g->stack;
                 }
                 else if (!g->b_parsing_attribute)
@@ -526,6 +507,293 @@ xml_res gambit_xml_parse_one_char(gambit_xml *g)
     g->xml = xmlptr;
     return g->r;
 }
+
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
+ * ZIP File Parsing
+ * ====================================================================================================================
+ */
+
+#define ZIP_LOCAL_FILE_HEADER_SIG        (0x04034b50)
+#define ZIP_CENTRAL_DIRECTORY_HEADER_SIG (0x02014b50)
+#define ZIP_END_OF_CENTRAL_DIRECTORY_SIG (0x06054b50)
+
+#define ZIP_DATA_DESCRIPTOR_SZ (12 + 4)
+
+#pragma pack(push, 1)
+typedef struct
+{
+    uint32_t HeaderSignaturelocal;
+    uint16_t VersionNeededToExtract;
+    uint16_t GeneralPurposeBitFlag; 
+    uint16_t CompressionMethod;     
+    uint16_t LastModFileTime;       
+    uint16_t LastModFileDate;       
+    uint32_t CRC32;                 
+    uint32_t CompressedSize;        
+    uint32_t UncompressedSize;      
+    uint16_t FileNameLength;        
+    uint16_t ExtraFieldLength;      
+} zip_local_file_header;
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+typedef struct
+{
+    uint32_t HeaderSignature;
+    uint16_t VersionMadeBy; 
+    uint16_t VersionNeededToExtract; 
+    uint16_t GeneralPurposeBitFlag;
+    uint16_t CompressionMethod;
+    uint16_t LastModeFileTime;
+    uint16_t LastModFileDate;
+    uint32_t CRC32;
+    uint32_t CompressedSize;
+    uint32_t UncompressedSize;
+    uint16_t FileNameLength;
+    uint16_t ExtraFieldLength;
+    uint16_t FileCommentLength;
+    uint16_t DiskNumberStart;
+    uint16_t InternalFileAttributes;
+    uint32_t ExternalFileAttributes;
+    uint32_t RelativeOffsetOfLocalHeader;
+    /*
+     * file name (variable size)
+     * extra field (variable size)
+     * file comment (variable size)
+     */
+} zip_central_directory_header;
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+typedef struct
+{
+    uint32_t Signature;
+    uint16_t NumberOfThisDisk;
+    uint16_t NumberOfThisDiskWStart;
+    uint16_t TotalEntriesOnThisDisk;
+    uint16_t TotalEntriesOnInCD;
+    uint32_t SizeOfCentralDirectory;
+    uint32_t OffsetOfStartOfCentralEtcEtc;
+    uint16_t ZIPFileCommentLength;
+    /* .ZIP file comment       (variable size)*/
+} zip_end_of_central_directory_record;
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+typedef struct
+{
+    uint32_t Signature;
+    uint32_t CRC32;
+    uint32_t CompressedSize;
+    uint32_t UncompressedSize;
+} zip_data_descriptor;
+#pragma pack(pop)
+
+size_t zip_end_of_central_directory_record_size(uint8_t *p)
+{
+    zip_end_of_central_directory_record *z = (zip_end_of_central_directory_record *) p;
+    return sizeof(zip_end_of_central_directory_record) + z->ZIPFileCommentLength;
+}
+
+size_t zip_local_file_header_size(uint8_t *p, char *c)
+{
+    int i;
+    zip_local_file_header *z = (zip_local_file_header *) p;    
+    p += sizeof(zip_local_file_header);
+    for (i = 0; i < z->FileNameLength && (i < (XRNS_MAX_NAME-1)); i++)
+        c[i] = p[i];
+    c[i] = 0;
+    return sizeof(zip_local_file_header) + z->FileNameLength + z->ExtraFieldLength;
+}
+
+size_t zip_central_directory_header_size(uint8_t *p)
+{
+    zip_central_directory_header *z = (zip_central_directory_header *) p;
+    return sizeof(zip_central_directory_header) + z->FileNameLength + z->ExtraFieldLength + z->FileCommentLength;
+}
+
+static inline uint32_t zip_sig(uint8_t *z)
+{
+    return *((uint32_t *) z);
+}
+
+uint8_t *gambit_unzip_single_file(uint8_t *p_deflate_stream, uint8_t *p_dest, mz_ulong *compressed_size, mz_ulong *uncompressed_size)
+{
+    if (MZ_OK != mz_uncompress_skip_header(p_dest, uncompressed_size, p_deflate_stream, *compressed_size))
+    {
+        printf("Can't uncompress this shit.\n");
+    }
+    return p_dest;
+}
+
+uint8_t *gambit_unzip_single_file_allocate(uint8_t *p_deflate_stream, mz_ulong *compressed_size, mz_ulong *uncompressed_size)
+{
+    void *p_out_mem = malloc(*uncompressed_size);
+    if (MZ_OK != mz_uncompress_skip_header(p_out_mem, uncompressed_size, p_deflate_stream, *compressed_size))
+    {
+        printf("Can't uncompress this shit.\n");
+    }
+    p_out_mem = realloc(p_out_mem, *uncompressed_size);
+    return p_out_mem;
+}
+
+typedef struct
+{
+    zip_local_file_header Header;
+    char                  FileName[XRNS_MAX_NAME];
+    char                 *p_mem;
+    char                  b_filename_matched;
+} gambit_zip_entry;
+
+typedef struct
+{
+    uint8_t *locals;
+    size_t   locals_len;
+    uint8_t *centrals;
+    size_t   centrals_len;    
+    int      total_num_files;
+} zip_file_write_context;
+
+void gambit_zip_start_writing(zip_file_write_context *ctx)
+{
+    ctx->locals          = 0;
+    ctx->locals_len      = 0;
+    ctx->centrals        = 0;
+    ctx->centrals_len    = 0;
+    ctx->total_num_files = 0;
+}
+
+void write_entire_file(char *p_filename, void *data, long file_size)
+{
+    FILE *F = fopen(p_filename, "wb");
+    fwrite(data, 1, file_size, F);
+    fclose(F);
+}
+
+void write_n_grow(uint8_t **p, size_t *sz, uint8_t *bytesToWrite, size_t numBytes)
+{
+    *sz += numBytes;
+    if (*p)
+        *p = realloc(*p, *sz);
+    else
+        *p = malloc(*sz);
+    
+    memcpy(*p + *sz - numBytes, bytesToWrite, numBytes);
+}
+
+void gambit_zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz, int b_compress, char *path)
+{
+    zip_local_file_header        localheader;
+    zip_central_directory_header centralheader;
+
+    localheader.HeaderSignaturelocal = ZIP_LOCAL_FILE_HEADER_SIG;
+    localheader.VersionNeededToExtract = 20;
+    localheader.GeneralPurposeBitFlag = 0;
+    localheader.LastModFileTime = 0;
+    localheader.LastModFileDate = 0;
+    localheader.UncompressedSize = sz;
+    localheader.FileNameLength = strlen(path);
+    localheader.ExtraFieldLength = 0;
+    
+    centralheader.HeaderSignature = ZIP_CENTRAL_DIRECTORY_HEADER_SIG;
+    centralheader.VersionMadeBy = 20;
+    centralheader.VersionNeededToExtract = 20;
+    centralheader.GeneralPurposeBitFlag = 0;
+    centralheader.LastModeFileTime = 0;
+    centralheader.LastModFileDate = 0;
+    centralheader.UncompressedSize = sz;
+    centralheader.FileNameLength = strlen(path);
+    centralheader.ExtraFieldLength = 0;
+    centralheader.FileCommentLength = 0;
+    centralheader.DiskNumberStart = 0;
+    centralheader.InternalFileAttributes = 0;
+    centralheader.ExternalFileAttributes = 0;
+
+    localheader.CRC32   = crc(mem, sz); 
+    centralheader.CRC32 = localheader.CRC32;
+    ctx->total_num_files++;
+
+    centralheader.RelativeOffsetOfLocalHeader = ctx->locals_len;
+
+    if (b_compress)
+    {
+        unsigned long compressed_sz;
+        uint8_t *Compressed;
+
+        compressed_sz = compressBound(sz);
+        Compressed = malloc(compressed_sz);
+        compress(Compressed, &compressed_sz, mem, sz);
+        localheader.CompressionMethod = 8;                  centralheader.CompressionMethod = localheader.CompressionMethod;
+        /* take off the annoying header and the checksum at the end */
+        localheader.CompressedSize = compressed_sz - 2 - 4; centralheader.CompressedSize = localheader.CompressedSize;
+        
+        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) &localheader,   sizeof(zip_local_file_header));
+        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) path,           strlen(path));
+        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) Compressed + 2, localheader.CompressedSize);
+
+        free(Compressed);
+    }
+    else
+    {
+        localheader.CompressionMethod = 0; centralheader.CompressionMethod = localheader.CompressionMethod;
+        localheader.CompressedSize = sz;   centralheader.CompressedSize = localheader.CompressedSize;
+
+        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) &localheader,   sizeof(zip_local_file_header));
+        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) path,           strlen(path));
+        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) mem,            sz);
+    }
+
+    write_n_grow(&ctx->centrals, &ctx->centrals_len, (uint8_t *) &centralheader, sizeof(zip_central_directory_header));
+    write_n_grow(&ctx->centrals, &ctx->centrals_len, (uint8_t *) path,           strlen(path));
+}
+
+void gambit_zip_finish_writing_and_save(zip_file_write_context *ctx, char *p_filename)
+{
+    uint8_t *mem = 0;
+    size_t   len = 0;
+
+    write_n_grow(&mem, &len, ctx->locals,   ctx->locals_len);
+    write_n_grow(&mem, &len, ctx->centrals, ctx->centrals_len);
+
+    zip_end_of_central_directory_record footer;
+    footer.Signature = ZIP_END_OF_CENTRAL_DIRECTORY_SIG;
+    footer.NumberOfThisDisk = 0;
+    footer.NumberOfThisDiskWStart = 0;
+    footer.TotalEntriesOnThisDisk = ctx->total_num_files;
+    footer.TotalEntriesOnInCD = ctx->total_num_files;
+    footer.SizeOfCentralDirectory = ctx->centrals_len;
+    footer.OffsetOfStartOfCentralEtcEtc = ctx->locals_len;
+    footer.ZIPFileCommentLength = 0;
+
+    write_n_grow(&mem, &len, (uint8_t *) &footer, sizeof(zip_end_of_central_directory_record));
+    write_entire_file(p_filename, mem, len);
+    free(ctx->locals);
+    free(ctx->centrals);
+    free(mem);
+}
+
+typedef struct
+{
+    uint8_t *base_zip;
+    uint8_t *pzip;
+    size_t   zip_sz;
+} gambit_zip_parsing_state;
+
+void gambit_start_parsing(gambit_zip_parsing_state *zs, uint8_t *p_zip, size_t zip_sz)
+{
+    zs->base_zip = p_zip;
+    zs->pzip     = p_zip;
+    zs->zip_sz   = zip_sz;
+}
+
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
+ * XRNS Parsing, Loading, Decoding
+ * ====================================================================================================================
+ */
 
 typedef void * (*xrns_worker_fcn) (void *);
 
@@ -764,11 +1032,6 @@ typedef struct
     unsigned int NumEnvelopesPerTrack[XRNS_MAX_NUM_TRACKS];
 } xrns_file_counts;
 
-#define ZIP_LOCAL_FILE_HEADER_SIG        (0x04034b50)
-#define ZIP_CENTRAL_DIRECTORY_HEADER_SIG (0x02014b50)
-#define ZIP_END_OF_CENTRAL_DIRECTORY_SIG (0x06054b50)
-
-#define ZIP_DATA_DESCRIPTOR_SZ (12 + 4)
 
 // @Optimization: Remove this conditional.
 #define XRNS_ACCESS_STEREO_SAMPLE(x) ((x >= 0 && x < MaxLengthSamples*2) ? pcm[x] : 0)
@@ -1461,273 +1724,6 @@ typedef struct
     unsigned int                  TotalColumns;
 } xrns_document;
 
-#pragma pack(push, 1)
-typedef struct
-{
-    uint32_t HeaderSignaturelocal;
-    uint16_t VersionNeededToExtract;
-    uint16_t GeneralPurposeBitFlag; 
-    uint16_t CompressionMethod;     
-    uint16_t LastModFileTime;       
-    uint16_t LastModFileDate;       
-    uint32_t CRC32;                 
-    uint32_t CompressedSize;        
-    uint32_t UncompressedSize;      
-    uint16_t FileNameLength;        
-    uint16_t ExtraFieldLength;      
-} zip_local_file_header;
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-typedef struct
-{
-    uint32_t HeaderSignature;
-    uint16_t VersionMadeBy; 
-    uint16_t VersionNeededToExtract; 
-    uint16_t GeneralPurposeBitFlag;
-    uint16_t CompressionMethod;
-    uint16_t LastModeFileTime;
-    uint16_t LastModFileDate;
-    uint32_t CRC32;
-    uint32_t CompressedSize;
-    uint32_t UncompressedSize;
-    uint16_t FileNameLength;
-    uint16_t ExtraFieldLength;
-    uint16_t FileCommentLength;
-    uint16_t DiskNumberStart;
-    uint16_t InternalFileAttributes;
-    uint32_t ExternalFileAttributes;
-    uint32_t RelativeOffsetOfLocalHeader;
-    /*
-    file name (variable size)
-    extra field (variable size)
-    file comment (variable size)
-    */
-} zip_central_directory_header;
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-typedef struct
-{
-    uint32_t Signature;
-    uint16_t NumberOfThisDisk;
-    uint16_t NumberOfThisDiskWStart;
-    uint16_t TotalEntriesOnThisDisk;
-    uint16_t TotalEntriesOnInCD;
-    uint32_t SizeOfCentralDirectory;
-    uint32_t OffsetOfStartOfCentralEtcEtc;
-    uint16_t ZIPFileCommentLength;
-      /*uint16_t .ZIP file comment       (variable size)*/
-} zip_end_of_central_directory_record;
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-typedef struct
-{
-    uint32_t Signature;
-    uint32_t CRC32;
-    uint32_t CompressedSize;
-    uint32_t UncompressedSize;
-} zip_data_descriptor;
-#pragma pack(pop)
-
-size_t zip_end_of_central_directory_record_size(uint8_t *p)
-{
-    zip_end_of_central_directory_record *z = (zip_end_of_central_directory_record *) p;
-    return sizeof(zip_end_of_central_directory_record) + z->ZIPFileCommentLength;
-}
-
-size_t zip_local_file_header_size(uint8_t *p, char *c)
-{
-    int i;
-    zip_local_file_header *z = (zip_local_file_header *) p;    
-    p += sizeof(zip_local_file_header);
-    for (i = 0; i < z->FileNameLength && (i < (XRNS_MAX_NAME-1)); i++)
-        c[i] = p[i];
-    c[i] = 0;
-    return sizeof(zip_local_file_header) + z->FileNameLength + z->ExtraFieldLength;
-}
-
-size_t zip_central_directory_header_size(uint8_t *p)
-{
-    zip_central_directory_header *z = (zip_central_directory_header *) p;
-    return sizeof(zip_central_directory_header) + z->FileNameLength + z->ExtraFieldLength + z->FileCommentLength;
-}
-
-static inline uint32_t zip_sig(uint8_t *z)
-{
-    return *((uint32_t *) z);
-}
-
-uint8_t *gambit_unzip_single_file(uint8_t *p_deflate_stream, uint8_t *p_dest, mz_ulong *compressed_size, mz_ulong *uncompressed_size)
-{
-    if (MZ_OK != mz_uncompress_skip_header(p_dest, uncompressed_size, p_deflate_stream, *compressed_size))
-    {
-        printf("Can't uncompress this shit.\n");
-    }
-    return p_dest;
-}
-
-uint8_t *gambit_unzip_single_file_allocate(uint8_t *p_deflate_stream, mz_ulong *compressed_size, mz_ulong *uncompressed_size)
-{
-    void *p_out_mem = malloc(*uncompressed_size);
-    if (MZ_OK != mz_uncompress_skip_header(p_out_mem, uncompressed_size, p_deflate_stream, *compressed_size))
-    {
-        printf("Can't uncompress this shit.\n");
-    }
-    p_out_mem = realloc(p_out_mem, *uncompressed_size);
-    return p_out_mem;
-}
-
-typedef struct
-{
-    zip_local_file_header Header;
-    char                  FileName[XRNS_MAX_NAME];
-    char                 *p_mem;
-    char                  b_filename_matched;
-} gambit_zip_entry;
-
-typedef struct
-{
-    uint8_t *locals;
-    size_t   locals_len;
-    uint8_t *centrals;
-    size_t   centrals_len;    
-    int      total_num_files;
-} zip_file_write_context;
-
-void gambit_zip_start_writing(zip_file_write_context *ctx)
-{
-    ctx->locals          = 0;
-    ctx->locals_len      = 0;
-    ctx->centrals        = 0;
-    ctx->centrals_len    = 0;
-    ctx->total_num_files = 0;
-}
-
-void write_entire_file(char *p_filename, void *data, long file_size)
-{
-    FILE *F = fopen(p_filename, "wb");
-    fwrite(data, 1, file_size, F);
-    fclose(F);
-}
-
-void write_n_grow(uint8_t **p, size_t *sz, uint8_t *bytesToWrite, size_t numBytes)
-{
-    *sz += numBytes;
-    if (*p)
-        *p = realloc(*p, *sz);
-    else
-        *p = malloc(*sz);
-    
-    memcpy(*p + *sz - numBytes, bytesToWrite, numBytes);
-}
-
-void gambit_zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz, int b_compress, char *path)
-{
-    zip_local_file_header        localheader;
-    zip_central_directory_header centralheader;
-
-    localheader.HeaderSignaturelocal = ZIP_LOCAL_FILE_HEADER_SIG;
-    localheader.VersionNeededToExtract = 20;
-    localheader.GeneralPurposeBitFlag = 0;
-    localheader.LastModFileTime = 0;
-    localheader.LastModFileDate = 0;
-    localheader.UncompressedSize = sz;
-    localheader.FileNameLength = strlen(path);
-    localheader.ExtraFieldLength = 0;
-    
-    centralheader.HeaderSignature = ZIP_CENTRAL_DIRECTORY_HEADER_SIG;
-    centralheader.VersionMadeBy = 20;
-    centralheader.VersionNeededToExtract = 20;
-    centralheader.GeneralPurposeBitFlag = 0;
-    centralheader.LastModeFileTime = 0;
-    centralheader.LastModFileDate = 0;
-    centralheader.UncompressedSize = sz;
-    centralheader.FileNameLength = strlen(path);
-    centralheader.ExtraFieldLength = 0;
-    centralheader.FileCommentLength = 0;
-    centralheader.DiskNumberStart = 0;
-    centralheader.InternalFileAttributes = 0;
-    centralheader.ExternalFileAttributes = 0;
-
-    localheader.CRC32   = crc(mem, sz); 
-    centralheader.CRC32 = localheader.CRC32;
-    ctx->total_num_files++;
-
-    centralheader.RelativeOffsetOfLocalHeader = ctx->locals_len;
-
-    if (b_compress)
-    {
-        unsigned long compressed_sz;
-        uint8_t *Compressed;
-
-        compressed_sz = compressBound(sz);
-        Compressed = malloc(compressed_sz);
-        compress(Compressed, &compressed_sz, mem, sz);
-        localheader.CompressionMethod = 8;                  centralheader.CompressionMethod = localheader.CompressionMethod;
-        /* take off the annoying header and the checksum at the end */
-        localheader.CompressedSize = compressed_sz - 2 - 4; centralheader.CompressedSize = localheader.CompressedSize;
-        
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) &localheader,   sizeof(zip_local_file_header));
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) path,           strlen(path));
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) Compressed + 2, localheader.CompressedSize);
-
-        free(Compressed);
-    }
-    else
-    {
-        localheader.CompressionMethod = 0; centralheader.CompressionMethod = localheader.CompressionMethod;
-        localheader.CompressedSize = sz;   centralheader.CompressedSize = localheader.CompressedSize;
-
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) &localheader,   sizeof(zip_local_file_header));
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) path,           strlen(path));
-        write_n_grow(&ctx->locals, &ctx->locals_len, (uint8_t *) mem,            sz);
-    }
-
-    write_n_grow(&ctx->centrals, &ctx->centrals_len, (uint8_t *) &centralheader, sizeof(zip_central_directory_header));
-    write_n_grow(&ctx->centrals, &ctx->centrals_len, (uint8_t *) path,           strlen(path));
-}
-
-void gambit_zip_finish_writing_and_save(zip_file_write_context *ctx, char *p_filename)
-{
-    uint8_t *mem = 0;
-    size_t   len = 0;
-
-    write_n_grow(&mem, &len, ctx->locals,   ctx->locals_len);
-    write_n_grow(&mem, &len, ctx->centrals, ctx->centrals_len);
-
-    zip_end_of_central_directory_record footer;
-    footer.Signature = ZIP_END_OF_CENTRAL_DIRECTORY_SIG;
-    footer.NumberOfThisDisk = 0;
-    footer.NumberOfThisDiskWStart = 0;
-    footer.TotalEntriesOnThisDisk = ctx->total_num_files;
-    footer.TotalEntriesOnInCD = ctx->total_num_files;
-    footer.SizeOfCentralDirectory = ctx->centrals_len;
-    footer.OffsetOfStartOfCentralEtcEtc = ctx->locals_len;
-    footer.ZIPFileCommentLength = 0;
-
-    write_n_grow(&mem, &len, (uint8_t *) &footer, sizeof(zip_end_of_central_directory_record));
-    write_entire_file(p_filename, mem, len);
-    free(ctx->locals);
-    free(ctx->centrals);
-    free(mem);
-}
-
-typedef struct
-{
-    uint8_t *base_zip;
-    uint8_t *pzip;
-    size_t   zip_sz;
-} gambit_zip_parsing_state;
-
-void gambit_start_parsing(gambit_zip_parsing_state *zs, uint8_t *p_zip, size_t zip_sz)
-{
-    zs->base_zip = p_zip;
-    zs->pzip     = p_zip;
-    zs->zip_sz   = zip_sz;
-}
-
 /* Return the file in a buffer, decompressing if nessescary.
  * Caller should free the p_mem pointer when finished.
  * p_mem is 0 if anything went wrong.
@@ -1957,8 +1953,8 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
 {
     TracyCZoneN(ctx, "XRNS Get Counts", 1);
 
-    gambit_xml x;
-    gambit_xml_init(&x, xml);
+    xml x;
+    xml_init(&x, xml);
 
     GZEROED(xrns_tag_set, t);
     GZEROED(xml_res, r);
@@ -1972,8 +1968,8 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
 
     do
     {
-        r = gambit_xml_parse_one_char(&x);
-        if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_END)
+        r = xml_parse_one_char(&x);
+        if (r.event_type == XML_EVENT_ELEMENT_END)
         {
             if (t.Instruments && t.Samples && xmltagmatch(r.name, "Sample"))
             {
@@ -2050,7 +2046,7 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
 
             UpdateXMLCountingTags(&t, r.name, 0);
         }
-        else if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_START)
+        else if (r.event_type == XML_EVENT_ELEMENT_START)
         {
             if (xmltagmatch(r.name, "ModulationSet"))
             {
@@ -2064,7 +2060,7 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
 
             UpdateXMLCountingTags(&t, r.name, 1);
         }
-        else if (r.event_type == GAMBIT_XML_EVENT_ATTR_VALUE)
+        else if (r.event_type == XML_EVENT_ATTR_VALUE)
         {
             if (MatchCharsToString(r.name, "doc_version"))
             {
@@ -2077,7 +2073,7 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
             }
         }
     }
-    while (r.event_type != GAMBIT_XML_EVENT_EOF);
+    while (r.event_type != XML_EVENT_EOF);
 
     TracyCZoneEnd(ctx);
 }
@@ -2102,7 +2098,7 @@ xrns_envelope *GetModulationPointer(xrns_modulation_set *ModulationSet, int Modu
     return 0;
 }
 
-void ParseEnvelope(xrns_envelope *Envelope, gambit_xml *x, galloc_ctx *g)
+void ParseEnvelope(xrns_envelope *Envelope, xml *x, galloc_ctx *g)
 {
     if (!Envelope) return;
 
@@ -2115,9 +2111,9 @@ void ParseEnvelope(xrns_envelope *Envelope, gambit_xml *x, galloc_ctx *g)
 
     do
     {
-        r = gambit_xml_parse_one_char(x);
+        r = xml_parse_one_char(x);
 
-        if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_END)
+        if (r.event_type == XML_EVENT_ELEMENT_END)
         {
             if (xmltagmatch(r.name, "SustainIsActive"))
             {   
@@ -2225,14 +2221,14 @@ void ParseEnvelope(xrns_envelope *Envelope, gambit_xml *x, galloc_ctx *g)
             if (xmltagmatch(r.name, "Decay"))
                 bInDecay = 0;
         }
-        else if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_START)
+        else if (r.event_type == XML_EVENT_ELEMENT_START)
         {
             if (xmltagmatch(r.name, "Points"))
                 bInPoints = 1;
             if (xmltagmatch(r.name, "Decay"))
                 bInDecay = 1;
         }
-    } while (r.event_type != GAMBIT_XML_EVENT_EOF);
+    } while (r.event_type != XML_EVENT_EOF);
 
     TracyCZoneEnd(ctx);
 }
@@ -2242,7 +2238,7 @@ void ParseInstruments
     ,xrns_document *xdoc
     ,int            PatternIdx
     ,int            TrackIdx
-    ,gambit_xml    *x
+    ,xml    *x
     ,xrns_tag_set  *t
     )
 {
@@ -2263,9 +2259,9 @@ void ParseInstruments
 
     do
     {
-        r = gambit_xml_parse_one_char(x);
+        r = xml_parse_one_char(x);
 
-        if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_END)
+        if (r.event_type == XML_EVENT_ELEMENT_END)
         {
             if (!xdoc->Instruments[InstrumentIdx].Name && !t->Samples && t->Instrument && xmltagmatch(r.name, "Name") && !t->PluginProperties && !t->GlobalProperties && !t->ModulationSets && !t->PluginGenerator)
             {
@@ -2494,12 +2490,12 @@ void ParseInstruments
 
             UpdateXMLInstrumentTags(t, r.name, 0);
         }
-        else if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_START)
+        else if (r.event_type == XML_EVENT_ELEMENT_START)
         {
             UpdateXMLInstrumentTags(t, r.name, 1);
         }
     
-    } while (r.event_type != GAMBIT_XML_EVENT_EOF);
+    } while (r.event_type != XML_EVENT_EOF);
 
     TracyCZoneEnd(ctx);
 }
@@ -2509,7 +2505,7 @@ void ParseLines
     ,xrns_document *xdoc
     ,int            PatternIdx
     ,int            TrackIdx
-    ,gambit_xml    *x
+    ,xml    *x
     ,xrns_tag_set  *t
     )
 {
@@ -2526,13 +2522,13 @@ void ParseLines
 
     do
     {
-        r = gambit_xml_parse_one_char(x);
+        r = xml_parse_one_char(x);
 
         int bIsCol = 0;
         int bIsNoteCol = 0;
         int bIsEffectCol = 0;
 
-        if (r.event_type > GAMBIT_XML_EVENT_NOTHING && r.event_type <= GAMBIT_XML_EVENT_ATTR_VALUE)
+        if (r.event_type > XML_EVENT_NOTHING && r.event_type <= XML_EVENT_ATTR_VALUE)
         {
             if (!(bIsNoteCol = xmltagmatch(r.name, "NoteColumn")))
             {
@@ -2543,12 +2539,12 @@ void ParseLines
 
         switch (r.event_type)
         {
-            case GAMBIT_XML_EVENT_ELEMENT_SELFCLOSING:
+            case XML_EVENT_ELEMENT_SELFCLOSING:
             {
                 if (bIsCol) ColumnCounter++;
                 break;
             }
-            case GAMBIT_XML_EVENT_ELEMENT_START:
+            case XML_EVENT_ELEMENT_START:
             {
                 if (bIsCol)
                 {
@@ -2587,7 +2583,7 @@ void ParseLines
 
                 break;
             }
-            case GAMBIT_XML_EVENT_ATTR_VALUE:
+            case XML_EVENT_ATTR_VALUE:
             {
                 if (MatchCharsToString(r.name, "index"))
                 {
@@ -2596,7 +2592,7 @@ void ParseLines
                 }
                 break;
             }
-            case GAMBIT_XML_EVENT_ELEMENT_END:
+            case XML_EVENT_ELEMENT_END:
             {
                 if ((t->PatternTrack || t->PatternMasterTrack || t->PatternGroupTrack) && bInNoteColumn)
                 {
@@ -2670,7 +2666,7 @@ void ParseLines
             default: {}
         }
 
-    } while (r.event_type != GAMBIT_XML_EVENT_EOF);
+    } while (r.event_type != XML_EVENT_EOF);
 
     TracyCZoneEnd(ctx);
 }
@@ -2678,7 +2674,7 @@ void ParseLines
 void ParseTracks
     (galloc_ctx    *g
     ,xrns_document *xdoc
-    ,gambit_xml    *x
+    ,xml    *x
     ,xrns_tag_set  *t
     )
 {
@@ -2693,9 +2689,9 @@ void ParseTracks
 
     do
     {
-        r = gambit_xml_parse_one_char(x);
+        r = xml_parse_one_char(x);
 
-        if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_END)
+        if (r.event_type == XML_EVENT_ELEMENT_END)
         {
             /* This is where the info about tracks is stored, their name, colour and 
              * grouping.
@@ -2834,17 +2830,17 @@ void ParseTracks
             UpdateXMLTrackTags(t, r.name, 0);
 
         }
-        else if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_START || r.event_type == GAMBIT_XML_EVENT_ELEMENT_SELFCLOSING)
+        else if (r.event_type == XML_EVENT_ELEMENT_START || r.event_type == XML_EVENT_ELEMENT_SELFCLOSING)
         {
             if (!t->AudioPluginDevice && xmltagmatch(r.name, "AudioPluginDevice"))
             {
                 EffectNumber++;
             }
 
-            UpdateXMLTrackTags(t, r.name, (r.event_type == GAMBIT_XML_EVENT_ELEMENT_START));
+            UpdateXMLTrackTags(t, r.name, (r.event_type == XML_EVENT_ELEMENT_START));
         }
 
-    } while (r.event_type != GAMBIT_XML_EVENT_EOF);
+    } while (r.event_type != XML_EVENT_EOF);
 
     TracyCZoneEnd(ctx);
 }
@@ -2924,8 +2920,8 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
         }
     }
 
-    gambit_xml x;
-    gambit_xml_init(&x, xml);
+    xml x;
+    xml_init(&x, xml);
 
     GZEROED(xrns_tag_set, t);
     GZEROED(xml_res, r);
@@ -2958,8 +2954,8 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
 
     do
     {
-        r = gambit_xml_parse_one_char(&x);
-        if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_END)
+        r = xml_parse_one_char(&x);
+        if (r.event_type == XML_EVENT_ELEMENT_END)
         {
             if (xmltagmatch(r.name, "SongName"))
             {
@@ -3068,19 +3064,19 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
             UpdateXMLTopLevelTags(&t, r.name, 0);
         }
 
-        if ((r.event_type == GAMBIT_XML_EVENT_ELEMENT_START) && xmltagmatch(r.name, "Tracks") && !t.Patterns)
+        if ((r.event_type == XML_EVENT_ELEMENT_START) && xmltagmatch(r.name, "Tracks") && !t.Patterns)
         {
             ParseTracks(g, xdoc, &x, &t);
             continue;
         }
 
-        if ((r.event_type == GAMBIT_XML_EVENT_ELEMENT_START) && xmltagmatch(r.name, "Lines"))
+        if ((r.event_type == XML_EVENT_ELEMENT_START) && xmltagmatch(r.name, "Lines"))
         {
             ParseLines(g, xdoc, PatternIdx, TrackIdx, &x, &t);
             continue;
         }
         
-        if (r.event_type == GAMBIT_XML_EVENT_ELEMENT_START || r.event_type == GAMBIT_XML_EVENT_ELEMENT_SELFCLOSING)
+        if (r.event_type == XML_EVENT_ELEMENT_START || r.event_type == XML_EVENT_ELEMENT_SELFCLOSING)
         {
             xrns_track *Track = &xdoc->PatternPool[PatternIdx].Tracks[TrackIdx];
             xrns_pattern_sequence_entry *PatternSeq = &xdoc->PatternSequence[PatternSequenceIdx];
@@ -3111,9 +3107,9 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
                 }
                 PatternSeq->NumMutedTracks++;
             }
-            UpdateXMLTopLevelTags(&t, r.name, (r.event_type == GAMBIT_XML_EVENT_ELEMENT_START));
+            UpdateXMLTopLevelTags(&t, r.name, (r.event_type == XML_EVENT_ELEMENT_START));
         }
-        else if (r.event_type == GAMBIT_XML_EVENT_ATTR_VALUE)
+        else if (r.event_type == XML_EVENT_ATTR_VALUE)
         {
             if (MatchCharsToString(r.name, "doc_version"))
             {
@@ -3133,7 +3129,7 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
             }
         }
     }
-    while (r.event_type != GAMBIT_XML_EVENT_EOF);
+    while (r.event_type != XML_EVENT_EOF);
 
     TracyCZoneEnd(ctx);
 
