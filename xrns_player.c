@@ -515,6 +515,59 @@ xml_res xml_parse_one_char(xml_ctx *g)
  * ====================================================================================================================
  */
 
+#define GZEROED(_type, _name) _type _name; memset(&_name, 0, sizeof(_type));
+
+void CopyBytes(void *dst, void *src, size_t len)
+{
+    char *sdst = (char *) dst;
+    char *ssrc = (char *) src;
+    while (len)
+    {
+        *sdst++ = *ssrc++;
+        len--;
+    }
+}
+
+void CopyBytesAppendingNULL(void *dst, void *src, size_t len)
+{
+    CopyBytes(dst, src, len);
+    ((char *)dst)[len] = 0;
+}
+
+/* galloc for persistent allocations
+ */
+typedef struct
+{
+    char   *BaseAddress;
+    char   *CurrentAddress;
+    /* for debugging only */
+    size_t  MaximumSizeBytes;
+} galloc_ctx;
+
+void *galloc(galloc_ctx *g, size_t Bytes)
+{
+    if (g->CurrentAddress - g->BaseAddress > g->MaximumSizeBytes)
+        return g->BaseAddress;
+
+    char *OutPtr = g->CurrentAddress;
+    g->CurrentAddress += Bytes;
+    return OutPtr;
+}
+
+void *galloc_aligned(galloc_ctx *g, size_t Bytes, int AlignmentBytes)
+{
+    char *OutPtr;
+    while ((unsigned long long) g->CurrentAddress % AlignmentBytes)
+    {
+        g->CurrentAddress++;
+    }
+
+    OutPtr = g->CurrentAddress;
+    g->CurrentAddress += Bytes;
+    
+    return OutPtr;
+}
+
 typedef struct
 {
     void    *Memory;
@@ -555,6 +608,61 @@ void xrns_magic_write_int(xrns_growing_buffer *Buf, int Value, int Offset)
 void xrns_growing_buffer_free(xrns_growing_buffer *Buf)
 {
     free(Buf->Memory);
+}
+
+int MatchCharsToString(char *Chars, char *String)
+{
+    int i;
+    unsigned int n = strlen(String);
+    for (i = 0; i < n; i++)
+    {
+        if (!Chars) return 0;
+        if (!String) return 0;
+
+        if (*Chars++ != *String++)
+            return 0;
+    }
+
+    return 1;    
+}
+
+typedef struct
+{
+    float       *OutputRingBuffer;
+    int          RingBufferReadPtr;
+    int          RingBufferWritePtr;
+    int          RingBufferFreeSamples;
+    int          RingBufferSz;
+} xrns_ringbuffer;
+
+void InitRingBuffer(xrns_ringbuffer *Ringbuffer)
+{
+    Ringbuffer->RingBufferSz          = 1<<13;
+    Ringbuffer->RingBufferWritePtr    = 0;
+    Ringbuffer->RingBufferReadPtr     = 0;
+    Ringbuffer->RingBufferFreeSamples = Ringbuffer->RingBufferSz;
+    Ringbuffer->OutputRingBuffer      = malloc(Ringbuffer->RingBufferSz * 2 * sizeof(float));
+}
+
+void FreeRingBuffer(xrns_ringbuffer *Ringbuffer)
+{
+    free(Ringbuffer->OutputRingBuffer);
+}
+
+void PushRingBuffer(xrns_ringbuffer *Ringbuffer, float *Samples, unsigned int NumSamples)
+{   
+    int i = 0;
+    while (i < NumSamples)
+    {
+        float *p_track_samples = &Ringbuffer->OutputRingBuffer[2 * Ringbuffer->RingBufferWritePtr];
+
+        p_track_samples[0] = Samples[2*i + 0];
+        p_track_samples[1] = Samples[2*i + 1];
+
+        Ringbuffer->RingBufferWritePtr = (Ringbuffer->RingBufferWritePtr + 1) % Ringbuffer->RingBufferSz;
+        Ringbuffer->RingBufferFreeSamples--;
+        i++;
+    }
 }
 
 /* ====================================================================================================================
@@ -987,6 +1095,662 @@ zip_entry zip_parse_next_file(zip_parsing_state *zs, char *only_unpack_this_file
     return z;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+static void *xrns_read_entire_file(char *p_filename, long *p_file_size)
+{
+    TracyCZoneN(ctx, "Read Entire File", 1);
+    FILE *F = fopen(p_filename, "rb");
+
+    if (!F)
+    {
+        printf("Failed to open %s", p_filename);
+        abort();
+        return NULL;
+    }
+
+    fseek(F, 0, SEEK_END);
+    long file_size = ftell(F);
+    fseek(F, 0, SEEK_SET);
+
+    void *file_mem = malloc(file_size + 32);
+    if (!file_mem)
+    {
+        printf("Failed to malloc %ld bytes for %s", file_size, p_filename);
+        fclose(F);
+        return NULL;
+    }
+
+    if (p_file_size) *p_file_size = file_size;
+
+    if (fread(file_mem, 1, file_size, F) != file_size)
+    {
+        printf("Couldn't read all the bytes for %s\n", p_filename);
+        fclose(F);
+        return NULL;
+    }
+
+    fclose(F);
+
+    TracyCZoneEnd(ctx);
+
+    return file_mem;
+}
+
+#define PITCHING_TABLE_LENGTH (193)
+static const double PitchingTable[PITCHING_TABLE_LENGTH] = 
+{
+    0.00390625,
+    0.00413852771234,
+    0.00438461737621,
+    0.00464534029298,
+    0.00492156660115,
+    0.00521421818035,
+    0.00552427172802,
+    0.00585276201905,
+    0.00620078535925,
+    0.00656950324417,
+    0.00696014623547,
+    0.00737401806783,
+    0.0078125,
+    0.00827705542468,
+    0.00876923475242,
+    0.00929068058596,
+    0.0098431332023,
+    0.0104284363607,
+    0.011048543456,
+    0.0117055240381,
+    0.0124015707185,
+    0.0131390064883,
+    0.0139202924709,
+    0.0147480361357,
+    0.015625,
+    0.0165541108494,
+    0.0175384695048,
+    0.0185813611719,
+    0.0196862664046,
+    0.0208568727214,
+    0.0220970869121,
+    0.0234110480762,
+    0.024803141437,
+    0.0262780129767,
+    0.0278405849419,
+    0.0294960722713,
+    0.03125,
+    0.0331082216987,
+    0.0350769390097,
+    0.0371627223438,
+    0.0393725328092,
+    0.0417137454428,
+    0.0441941738242,
+    0.0468220961524,
+    0.049606282874,
+    0.0525560259534,
+    0.0556811698838,
+    0.0589921445426,
+    0.0625,
+    0.0662164433975,
+    0.0701538780193,
+    0.0743254446877,
+    0.0787450656184,
+    0.0834274908856,
+    0.0883883476483,
+    0.0936441923048,
+    0.099212565748,
+    0.105112051907,
+    0.111362339768,
+    0.117984289085,
+    0.125,
+    0.132432886795,
+    0.140307756039,
+    0.148650889375,
+    0.157490131237,
+    0.166854981771,
+    0.176776695297,
+    0.18728838461,
+    0.198425131496,
+    0.210224103813,
+    0.222724679535,
+    0.23596857817,
+    0.25,
+    0.26486577359,
+    0.280615512077,
+    0.297301778751,
+    0.314980262474,
+    0.333709963543,
+    0.353553390593,
+    0.374576769219,
+    0.396850262992,
+    0.420448207627,
+    0.44544935907,
+    0.471937156341,
+    0.5,
+    0.52973154718,
+    0.561231024155,
+    0.594603557501,
+    0.629960524947,
+    0.667419927085,
+    0.707106781187,
+    0.749153538438,
+    0.793700525984,
+    0.840896415254,
+    0.89089871814,
+    0.943874312682,
+    1.0,
+    1.05946309436,
+    1.12246204831,
+    1.189207115,
+    1.25992104989,
+    1.33483985417,
+    1.41421356237,
+    1.49830707688,
+    1.58740105197,
+    1.68179283051,
+    1.78179743628,
+    1.88774862536,
+    2.0,
+    2.11892618872,
+    2.24492409662,
+    2.37841423001,
+    2.51984209979,
+    2.66967970834,
+    2.82842712475,
+    2.99661415375,
+    3.17480210394,
+    3.36358566101,
+    3.56359487256,
+    3.77549725073,
+    4.0,
+    4.23785237744,
+    4.48984819324,
+    4.75682846001,
+    5.03968419958,
+    5.33935941668,
+    5.65685424949,
+    5.99322830751,
+    6.34960420787,
+    6.72717132203,
+    7.12718974512,
+    7.55099450145,
+    8.0,
+    8.47570475487,
+    8.97969638647,
+    9.51365692002,
+    10.0793683992,
+    10.6787188334,
+    11.313708499,
+    11.986456615,
+    12.6992084157,
+    13.4543426441,
+    14.2543794902,
+    15.1019890029,
+    16.0,
+    16.9514095097,
+    17.9593927729,
+    19.02731384,
+    20.1587367983,
+    21.3574376667,
+    22.627416998,
+    23.97291323,
+    25.3984168315,
+    26.9086852881,
+    28.5087589805,
+    30.2039780058,
+    32.0,
+    33.9028190195,
+    35.9187855459,
+    38.0546276801,
+    40.3174735966,
+    42.7148753334,
+    45.2548339959,
+    47.9458264601,
+    50.796833663,
+    53.8173705762,
+    57.017517961,
+    60.4079560116,
+    64.0,
+    67.805638039,
+    71.8375710918,
+    76.1092553602,
+    80.6349471933,
+    85.4297506669,
+    90.5096679919,
+    95.8916529201,
+    101.593667326,
+    107.634741152,
+    114.035035922,
+    120.815912023,
+    128.0,
+    135.611276078,
+    143.675142184,
+    152.21851072,
+    161.269894387,
+    170.859501334,
+    181.019335984,
+    191.78330584,
+    203.187334652,
+    215.269482305,
+    228.070071844,
+    241.631824047,
+    256.0
+};
+
+static const float PianoPitches[120] = 
+{
+    25.9565f,
+    27.5000f,
+    29.1352f,
+    30.8677f,
+    32.7032f,
+    34.6478f,
+    36.7081f,
+    38.8909f,
+    41.2034f,
+    43.6535f,
+    46.2493f,
+    48.9994f,
+    51.9131f,
+    55.0000f,
+    58.2705f,
+    61.7354f,
+    65.4064f,
+    69.2957f,
+    73.4162f,
+    77.7817f,
+    82.4069f,
+    87.3071f,
+    92.4986f,
+    97.9989f,
+    103.8262f,
+    110.0000f,
+    116.5409f,
+    123.4708f,
+    130.8128f,
+    138.5913f,
+    146.8324f,
+    155.5635f,
+    164.8138f,
+    174.6141f,
+    184.9972f,
+    195.9977f,
+    207.6523f,
+    220.0000f,
+    233.0819f,
+    246.9417f,
+    261.6256f,
+    277.1826f,
+    293.6648f,
+    311.1270f,
+    329.6276f,
+    349.2282f,
+    369.9944f,
+    391.9954f,
+    415.3047f,
+    440.0000f,
+    466.1638f,
+    493.8833f,
+    523.2511f,
+    554.3653f,
+    587.3295f,
+    622.2540f,
+    659.2551f,
+    698.4565f,
+    739.9888f,
+    783.9909f,
+    830.6094f,
+    880.0000f,
+    932.3275f,
+    987.7666f,
+    1046.5023f,
+    1108.7305f,
+    1174.6591f,
+    1244.5079f,
+    1318.5102f,
+    1396.9129f,
+    1479.9777f,
+    1567.9817f,
+    1661.2188f,
+    1760.0000f,
+    1864.6550f,
+    1975.5332f,
+    2093.0045f,
+    2217.4610f,
+    2349.3181f,
+    2489.0159f,
+    2637.0205f,
+    2793.8259f,
+    2959.9554f,
+    3135.9635f,
+    3322.4376f,
+    3520.0000f,
+    3729.3101f,
+    3951.0664f,
+    4186.0090f,
+    4434.9221f,
+    4698.6363f,
+    4978.0317f,
+    5274.0409f,
+    5587.6517f,
+    5919.9108f,
+    6271.9270f,
+    6644.8752f,
+    7040.0000f,
+    7458.6202f,
+    7902.1328f,
+    8372.0181f,
+    8869.8442f,
+    9397.2726f,
+    9956.0635f,
+    10548.0818f,
+    11175.3034f,
+    11839.8215f,
+    12543.8540f,
+    13289.7503f,
+    14080.0000f,
+    14917.2404f,
+    15804.2656f,
+    16744.0362f,
+    17739.6884f,
+    18794.5451f,
+    19912.1270f,
+    21096.1636f,
+    22350.6068f,
+    23679.6431f,
+    25087.7079f
+};
+
+unsigned int NoteToHzAssumingA440(int note_id)
+{
+    if (note_id > 0 && note_id < 120)
+    {
+        return PianoPitches[note_id];
+    }
+
+    return 0;
+}
+
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
+ * Structures
+ * ====================================================================================================================
+ */
+
+typedef struct 
+{
+    xrns_growing_buffer EnvelopesPerTrackPerPattern;
+    int          RenoiseVersion;
+    unsigned int NumTracks;
+    unsigned int NumInstruments;
+    unsigned int PatternSequenceLength;
+    unsigned int NumPatterns;
+    unsigned int NumSamplesPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
+    unsigned int NumSampleSplitMapsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
+    unsigned int NumModulationSetsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
+    unsigned int NumSliceRegionsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
+    unsigned int NumEffectUnitsPerTrack[XRNS_MAX_NUM_TRACKS];
+    unsigned int NumEnvelopesPerTrack[XRNS_MAX_NUM_TRACKS];
+} xrns_file_counts;
+
+#pragma pack(push, 1)
+typedef struct
+{
+    uint32_t Track;
+    uint32_t Col;
+    uint32_t NoteID;
+    uint32_t NoteHz;
+    uint32_t InstrumentID;
+    uint32_t SampleID;
+    uint32_t PlaybackDirection;
+    float    SecondsPlayingFor;
+    float    ActualNoteHz;
+} xrns_sampler_info;
+#pragma pack(pop)
+
+typedef struct
+{
+    int16_t     *PCM;
+
+    char        *Name;
+    float        Volume;
+    float        Panning;
+    int          Transpose;
+    int          Finetune;
+    int          NewNoteAction;
+    int          InterpolationMode;
+    int          BeatSyncIsActive;
+    unsigned int BeatSyncLines;
+
+    int          LoopMode;
+    int          LoopRelease;
+    unsigned int LoopStart;
+    unsigned int LoopEnd;
+
+    unsigned int LengthSamples;
+    unsigned int NumChannels;
+    double       SampleRateHz;
+    int          ModulationSetIndex;
+
+    char         bIsAlisedSample;
+    unsigned int SampleStart;
+
+    // @Optimization: We should use a new data structure for this.
+    int          InstrumentNumber;
+    int          SampleNumber;
+    // Added these for the instrument writer.
+    int          BaseNote;
+    int          NoteStart;
+    int          NoteEnd;  
+} xrns_sample;
+
+typedef struct
+{
+    unsigned int Pos;
+    float        Val;
+    float        Bez;
+} xrns_point;
+
+typedef struct 
+{
+    unsigned int  NumPoints;
+    xrns_point   *Points;
+    int           LoopMode;
+    unsigned int  LoopStart;
+    unsigned int  LoopEnd;
+    char          bSustainOn;
+    unsigned int  SustainPosition;
+    int           CurveType;
+    unsigned int  Duration;
+    unsigned int  ReleaseValue;
+    int           Units;
+    int           Polarity;
+    int           DeviceIndex;
+    int           ParameterIndex;
+} xrns_envelope;
+
+typedef struct
+{
+    int     Type;
+    int     Enabled;
+    int     NumParameters;
+    float   Parameters[32];
+} dsp_effect_desc;
+
+typedef struct
+{
+    int           PitchModulationRange;
+
+    xrns_envelope Volume;
+    xrns_envelope Panning;
+    xrns_envelope Pitch;
+
+    char          bVolumeEnvelopePresent;
+    char          bPanningEnvelopePresent;
+    char          bPitchEnvelopePresent;
+
+} xrns_modulation_set;
+
+typedef struct
+{
+    unsigned int SampleIndex;
+    int          UseEnvelopes;
+    int          MapVelocityToVolume;
+    unsigned int BaseNote;
+    unsigned int NoteStart;
+    unsigned int NoteEnd;
+    unsigned int VelocityStart;
+    unsigned int VelocityEnd;
+    char         bIsNoteOn; 
+} xrns_ssm;  /* TODO: seems like this should just belong to the sample data struct */
+
+typedef struct
+{
+    char                *Name;
+    unsigned int         NumSamples;
+    xrns_sample         *Samples;
+    unsigned int         NumSampleSplitMaps;
+    xrns_ssm            *SampleSplitMaps;
+
+    char                 bIsSliced;
+    unsigned int         NumSliceRegions;
+    unsigned int        *SliceRegions;
+
+    /* In Renoise 2.x, this can be at most 1. */
+    unsigned int         NumModulationSets;
+    xrns_modulation_set *ModulationSets;
+} xrns_instrument;
+
+typedef struct
+{
+    /* Must be either 
+     *   XRNS_NOTE_EFFECT
+     *   XRNS_NOTE_REAL
+     */
+    unsigned int  Type;
+    
+    /* only applies to XRNS_NOTE_REAL
+     * may be C0 through to B9, so 0 through to 119 inclusive.
+     * may also be XRNS_NOTE_BLANK
+     *             XRNS_NOTE_OFF
+     */
+    unsigned int  Note;            
+    unsigned int  Column;          /* ignored by XRNS_NOTE_EFFECT */
+    unsigned int  Line;
+    unsigned int  Instrument;      /* permitted to be XRNS_MISSING_VALUE */
+    unsigned int  Volume;          /* permitted to be XRNS_MISSING_VALUE */ 
+    unsigned int  Panning;         /* permitted to be XRNS_MISSING_VALUE */
+    unsigned int  Delay;           /* permitted to be XRNS_MISSING_VALUE */
+
+    char VolumeEffect[2];          /* permitted to be \0\0 */
+    char PanningEffect[2];         /* permitted to be \0\0 */
+
+    /* If Type is XRNS_NOTE_EFFECT, these will be populated and valid.
+     * Otherwise, these will both be populated and set if a Renoise 3.x file
+     * was loaded and sample-effects were found. Otherwise these will be
+     * XRNS_MISSING_VALUE.
+     */
+    unsigned int  EffectTypeIdx;
+    unsigned int  EffectValue;
+
+    char EffectTypeC[2];
+
+} xrns_note;
+
+typedef struct
+{
+    unsigned int   NumNotes;
+    char           bIsAlias;
+    unsigned int   AliasIdx;
+    xrns_note     *Notes;
+    unsigned int   NumEnvelopes;
+    xrns_envelope *Envelopes;
+} xrns_track;
+
+typedef struct
+{
+    unsigned int     NumColumns;
+    unsigned int     NumEffectColumns;
+    char             bIsGroup;
+    unsigned int     WrapsNPreviousTracks;
+    unsigned int     Depth;
+    char            *Name;
+    float            InitialPreVolume;
+    float            InitialPostVolume;
+    float            InitialPanning;
+    float            PostPanning;
+    float            InitialWidth;
+    unsigned int     NumDSPEffectUnits;
+    dsp_effect_desc *DSPEffectDescs;
+} xrns_track_desc;
+
+typedef struct
+{
+    char          *Name;
+    unsigned int   NumberOfLines;
+    xrns_track    *Tracks;
+} xrns_pattern;
+
+typedef struct 
+{
+    unsigned int  PatternIdx;
+    char         *SectionName;
+    char          bIsSectionStart;
+    unsigned int  NumMutedTracks;
+    unsigned int *MutedTracks;
+} xrns_pattern_sequence_entry;
+
+typedef struct
+{
+    int                           RenoiseVersion;
+    float                         BeatsPerMin;
+    int                           LinesPerBeat;
+    unsigned int                  TicksPerLine;
+    char                         *SongName; 
+    char                         *Artist;
+    unsigned int                  NumInstruments;
+    xrns_instrument              *Instruments;
+    unsigned int                  NumPatterns;
+    xrns_pattern                 *PatternPool;
+    unsigned int                  PatternSequenceLength;
+    xrns_pattern_sequence_entry  *PatternSequence;
+    unsigned int                  NumTracks;
+    xrns_track_desc              *Tracks;
+    unsigned int                  TotalColumns;
+} xrns_document;
+
 /* ====================================================================================================================
  * ====================================================================================================================
  * ====================================================================================================================
@@ -1227,58 +1991,28 @@ int EffectTypeIdxFromEffectType(char *c)
     }
 }
 
-static void *xrns_read_entire_file(char *p_filename, long *p_file_size)
-{
-    TracyCZoneN(ctx, "Read Entire File", 1);
-    FILE *F = fopen(p_filename, "rb");
 
-    if (!F)
-    {
-        printf("Failed to open %s", p_filename);
-        abort();
-        return NULL;
-    }
-
-    fseek(F, 0, SEEK_END);
-    long file_size = ftell(F);
-    fseek(F, 0, SEEK_SET);
-
-    void *file_mem = malloc(file_size + 32);
-    if (!file_mem)
-    {
-        printf("Failed to malloc %ld bytes for %s", file_size, p_filename);
-        fclose(F);
-        return NULL;
-    }
-
-    if (p_file_size) *p_file_size = file_size;
-
-    if (fread(file_mem, 1, file_size, F) != file_size)
-    {
-        printf("Couldn't read all the bytes for %s\n", p_filename);
-        fclose(F);
-        return NULL;
-    }
-
-    fclose(F);
-
-    TracyCZoneEnd(ctx);
-
-    return file_mem;
+void ParsePointFromTriple(xrns_point *Point, char *XML)
+{   
+    Point->Pos = atoi(XML);
+    XML = strstr(XML, ",") + 1;
+    Point->Val = atof(XML);
+    XML = strstr(XML, ",") + 1;
+    Point->Bez = atof(XML);
 }
 
-#define PITCHING_TABLE_LENGTH (193)
-static const double PitchingTable[PITCHING_TABLE_LENGTH] = {0.00390625, 0.00413852771234, 0.00438461737621, 0.00464534029298, 0.00492156660115, 0.00521421818035, 0.00552427172802, 0.00585276201905, 0.00620078535925, 0.00656950324417, 0.00696014623547, 0.00737401806783,    0.0078125, 0.00827705542468, 0.00876923475242, 0.00929068058596, 0.0098431332023, 0.0104284363607, 0.011048543456, 0.0117055240381, 0.0124015707185, 0.0131390064883, 0.0139202924709, 0.0147480361357,     0.015625, 0.0165541108494, 0.0175384695048, 0.0185813611719, 0.0196862664046, 0.0208568727214, 0.0220970869121, 0.0234110480762, 0.024803141437, 0.0262780129767, 0.0278405849419, 0.0294960722713,      0.03125, 0.0331082216987, 0.0350769390097, 0.0371627223438, 0.0393725328092, 0.0417137454428, 0.0441941738242, 0.0468220961524, 0.049606282874, 0.0525560259534, 0.0556811698838, 0.0589921445426,       0.0625, 0.0662164433975, 0.0701538780193, 0.0743254446877, 0.0787450656184, 0.0834274908856, 0.0883883476483, 0.0936441923048, 0.099212565748, 0.105112051907, 0.111362339768, 0.117984289085,        0.125, 0.132432886795, 0.140307756039, 0.148650889375, 0.157490131237, 0.166854981771, 0.176776695297, 0.18728838461, 0.198425131496, 0.210224103813, 0.222724679535, 0.23596857817,         0.25, 0.26486577359, 0.280615512077, 0.297301778751, 0.314980262474, 0.333709963543, 0.353553390593, 0.374576769219, 0.396850262992, 0.420448207627, 0.44544935907, 0.471937156341,          0.5, 0.52973154718, 0.561231024155, 0.594603557501, 0.629960524947, 0.667419927085, 0.707106781187, 0.749153538438, 0.793700525984, 0.840896415254, 0.89089871814, 0.943874312682,            1.0, 1.05946309436, 1.12246204831,  1.189207115, 1.25992104989, 1.33483985417, 1.41421356237, 1.49830707688, 1.58740105197, 1.68179283051, 1.78179743628, 1.88774862536,            2.0, 2.11892618872, 2.24492409662, 2.37841423001, 2.51984209979, 2.66967970834, 2.82842712475, 2.99661415375, 3.17480210394, 3.36358566101, 3.56359487256, 3.77549725073,            4.0, 4.23785237744, 4.48984819324, 4.75682846001, 5.03968419958, 5.33935941668, 5.65685424949, 5.99322830751, 6.34960420787, 6.72717132203, 7.12718974512, 7.55099450145,            8.0, 8.47570475487, 8.97969638647, 9.51365692002, 10.0793683992, 10.6787188334, 11.313708499, 11.986456615, 12.6992084157, 13.4543426441, 14.2543794902, 15.1019890029,           16.0, 16.9514095097, 17.9593927729,  19.02731384, 20.1587367983, 21.3574376667, 22.627416998,  23.97291323, 25.3984168315, 26.9086852881, 28.5087589805, 30.2039780058,           32.0, 33.9028190195, 35.9187855459, 38.0546276801, 40.3174735966, 42.7148753334, 45.2548339959, 47.9458264601, 50.796833663, 53.8173705762, 57.017517961, 60.4079560116,           64.0, 67.805638039, 71.8375710918, 76.1092553602, 80.6349471933, 85.4297506669, 90.5096679919, 95.8916529201, 101.593667326, 107.634741152, 114.035035922, 120.815912023,          128.0, 135.611276078, 143.675142184, 152.21851072, 161.269894387, 170.859501334, 181.019335984, 191.78330584, 203.187334652, 215.269482305, 228.070071844, 241.631824047, 256.0};
-static const float  PianoPitches[120] = {25.9565f, 27.5000f, 29.1352f, 30.8677f, 32.7032f, 34.6478f, 36.7081f, 38.8909f, 41.2034f, 43.6535f, 46.2493f, 48.9994f, 51.9131f, 55.0000f, 58.2705f, 61.7354f, 65.4064f, 69.2957f, 73.4162f, 77.7817f, 82.4069f, 87.3071f, 92.4986f, 97.9989f, 103.8262f, 110.0000f, 116.5409f, 123.4708f, 130.8128f, 138.5913f, 146.8324f, 155.5635f, 164.8138f, 174.6141f, 184.9972f, 195.9977f, 207.6523f, 220.0000f, 233.0819f, 246.9417f, 261.6256f, 277.1826f, 293.6648f, 311.1270f, 329.6276f, 349.2282f, 369.9944f, 391.9954f, 415.3047f, 440.0000f, 466.1638f, 493.8833f, 523.2511f, 554.3653f, 587.3295f, 622.2540f, 659.2551f, 698.4565f, 739.9888f, 783.9909f, 830.6094f, 880.0000f, 932.3275f, 987.7666f, 1046.5023f, 1108.7305f, 1174.6591f, 1244.5079f, 1318.5102f, 1396.9129f, 1479.9777f, 1567.9817f, 1661.2188f, 1760.0000f, 1864.6550f, 1975.5332f, 2093.0045f, 2217.4610f, 2349.3181f, 2489.0159f, 2637.0205f, 2793.8259f, 2959.9554f, 3135.9635f, 3322.4376f, 3520.0000f, 3729.3101f, 3951.0664f, 4186.0090f, 4434.9221f, 4698.6363f, 4978.0317f, 5274.0409f, 5587.6517f, 5919.9108f, 6271.9270f, 6644.8752f, 7040.0000f, 7458.6202f, 7902.1328f, 8372.0181f, 8869.8442f, 9397.2726f, 9956.0635f, 10548.0818f, 11175.3034f, 11839.8215f, 12543.8540f, 13289.7503f, 14080.0000f, 14917.2404f, 15804.2656f, 16744.0362f, 17739.6884f, 18794.5451f, 19912.1270f, 21096.1636f, 22350.6068f, 23679.6431f, 25087.7079f};
-
-unsigned int NoteToHzAssumingA440(int note_id)
+void InitNote(xrns_note *Note)
 {
-    if (note_id > 0 && note_id < 120)
-    {
-        return PianoPitches[note_id];
-    }
-
-    return 0;
+    Note->Type          = XRNS_NOTE_REAL;
+    Note->Note          = XRNS_NOTE_BLANK;
+    Note->Column        = 0;
+    Note->Line          = 0;
+    Note->Instrument    = XRNS_MISSING_VALUE;
+    Note->Volume        = XRNS_MISSING_VALUE;
+    Note->Panning       = XRNS_MISSING_VALUE;
+    Note->Delay         = XRNS_MISSING_VALUE;
+    Note->EffectTypeIdx = XRNS_MISSING_VALUE;
+    Note->EffectValue   = XRNS_MISSING_VALUE;
 }
 
 unsigned char XRNSOctavelessNoteValue(unsigned char Note, unsigned char Sharp)
@@ -1414,45 +2148,20 @@ int ParseIntegerOrDotsFromXML(char *XML)
     return atoi(XML);
 }
 
-int MatchCharsToString(char *Chars, char *String)
-{
-    int i;
-    unsigned int n = strlen(String);
-    for (i = 0; i < n; i++)
-    {
-        if (!Chars) return 0;
-        if (!String) return 0;
-
-        if (*Chars++ != *String++)
-            return 0;
-    }
-
-    return 1;    
-}
-
-void CopyBytes(void *dst, void *src, size_t len)
-{
-    char *sdst = (char *) dst;
-    char *ssrc = (char *) src;
-    while (len)
-    {
-        *sdst++ = *ssrc++;
-        len--;
-    }
-}
-
-void CopyBytesAppendingNULL(void *dst, void *src, size_t len)
-{
-    CopyBytes(dst, src, len);
-    ((char *)dst)[len] = 0;
-}
-
 unsigned int XMLTagLength(char *xml)
 {
     unsigned int len = 0;
     while (xml && *xml != '<')
         {xml++; len++;}
     return len;
+}
+
+void *GallocStringFromXML(galloc_ctx *g, xml_res *r)
+{
+    unsigned int Length = XMLTagLength(r->value);
+    void *Dest = galloc(g, Length + 1);
+    CopyBytesAppendingNULL(Dest, r->value, Length);
+    return Dest;
 }
 
 int xmltagmatch(char *a, char *b)
@@ -1468,292 +2177,6 @@ int xmltagmatch(char *a, char *b)
 
     return 1;
 }
-
-int xmlcopy(char *a, char *b)
-{
-    while (*b)
-    {
-        if (*a++ != *b++)
-            return 0;
-    }
-
-    if (*a != ' ' && *a != '>' && *a != '/')
-        return 0;
-
-    return 1;
-}
-
-typedef struct 
-{
-    xrns_growing_buffer EnvelopesPerTrackPerPattern;
-    int          RenoiseVersion;
-    unsigned int NumTracks;
-    unsigned int NumInstruments;
-    unsigned int PatternSequenceLength;
-    unsigned int NumPatterns;
-    unsigned int NumSamplesPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
-    unsigned int NumSampleSplitMapsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
-    unsigned int NumModulationSetsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
-    unsigned int NumSliceRegionsPerInstrument[XRNS_MAX_NUM_INSTRUMENTS];
-    unsigned int NumEffectUnitsPerTrack[XRNS_MAX_NUM_TRACKS];
-    unsigned int NumEnvelopesPerTrack[XRNS_MAX_NUM_TRACKS];
-} xrns_file_counts;
-
-#pragma pack(push, 1)
-typedef struct
-{
-    uint32_t Track;
-    uint32_t Col;
-    uint32_t NoteID;
-    uint32_t NoteHz;
-    uint32_t InstrumentID;
-    uint32_t SampleID;
-    uint32_t PlaybackDirection;
-    float    SecondsPlayingFor;
-    float    ActualNoteHz;
-} xrns_sampler_info;
-#pragma pack(pop)
-
-typedef struct
-{
-    int16_t     *PCM;
-
-    char        *Name;
-    float        Volume;
-    float        Panning;
-    int          Transpose;
-    int          Finetune;
-    int          NewNoteAction;
-    int          InterpolationMode;
-    int          BeatSyncIsActive;
-    unsigned int BeatSyncLines;
-
-    int          LoopMode;
-    int          LoopRelease;
-    unsigned int LoopStart;
-    unsigned int LoopEnd;
-
-    unsigned int LengthSamples;
-    unsigned int NumChannels;
-    double       SampleRateHz;
-    int          ModulationSetIndex;
-
-    char         bIsAlisedSample;
-    unsigned int SampleStart;
-
-    // @Optimization: We should use a new data structure for this.
-    int          InstrumentNumber;
-    int          SampleNumber;
-    // Added these for the instrument writer.
-    int          BaseNote;
-    int          NoteStart;
-    int          NoteEnd;  
-} xrns_sample;
-
-typedef struct
-{
-    unsigned int Pos;
-    float        Val;
-    float        Bez;
-} xrns_point;
-
-typedef struct 
-{
-    unsigned int  NumPoints;
-    xrns_point   *Points;
-    int           LoopMode;
-    unsigned int  LoopStart;
-    unsigned int  LoopEnd;
-    char          bSustainOn;
-    unsigned int  SustainPosition;
-    int           CurveType;
-    unsigned int  Duration;
-    unsigned int  ReleaseValue;
-    int           Units;
-    int           Polarity;
-    int           DeviceIndex;
-    int           ParameterIndex;
-} xrns_envelope;
-
-void ParsePointFromTriple(xrns_point *Point, char *XML)
-{   
-    Point->Pos = atoi(XML);
-    XML = strstr(XML, ",") + 1;
-    Point->Val = atof(XML);
-    XML = strstr(XML, ",") + 1;
-    Point->Bez = atof(XML);
-}
-
-typedef struct
-{
-    int     Type;
-    int     Enabled;
-    int     NumParameters;
-    float   Parameters[32];
-} dsp_effect_desc;
-
-typedef struct
-{
-    int           PitchModulationRange;
-
-    xrns_envelope Volume;
-    xrns_envelope Panning;
-    xrns_envelope Pitch;
-
-    char          bVolumeEnvelopePresent;
-    char          bPanningEnvelopePresent;
-    char          bPitchEnvelopePresent;
-
-} xrns_modulation_set;
-
-typedef struct
-{
-    unsigned int SampleIndex;
-    int          UseEnvelopes;
-    int          MapVelocityToVolume;
-    unsigned int BaseNote;
-    unsigned int NoteStart;
-    unsigned int NoteEnd;
-    unsigned int VelocityStart;
-    unsigned int VelocityEnd;
-    char         bIsNoteOn; 
-} xrns_ssm;  /* TODO: seems like this should just belong to the sample data struct */
-
-typedef struct
-{
-    char                *Name;
-    unsigned int         NumSamples;
-    xrns_sample         *Samples;
-    unsigned int         NumSampleSplitMaps;
-    xrns_ssm            *SampleSplitMaps;
-
-    char                 bIsSliced;
-    unsigned int         NumSliceRegions;
-    unsigned int        *SliceRegions;
-
-    /* In Renoise 2.x, this can be at most 1. */
-    unsigned int         NumModulationSets;
-    xrns_modulation_set *ModulationSets;
-} xrns_instrument;
-
-typedef struct
-{
-    /* Must be either 
-     *   XRNS_NOTE_EFFECT
-     *   XRNS_NOTE_REAL
-     */
-    unsigned int  Type;
-    
-    /* only applies to XRNS_NOTE_REAL
-     * may be C0 through to B9, so 0 through to 119 inclusive.
-     * may also be XRNS_NOTE_BLANK
-     *             XRNS_NOTE_OFF
-     */
-    unsigned int  Note;            
-    unsigned int  Column;          /* ignored by XRNS_NOTE_EFFECT */
-    unsigned int  Line;
-    unsigned int  Instrument;      /* permitted to be XRNS_MISSING_VALUE */
-    unsigned int  Volume;          /* permitted to be XRNS_MISSING_VALUE */ 
-    unsigned int  Panning;         /* permitted to be XRNS_MISSING_VALUE */
-    unsigned int  Delay;           /* permitted to be XRNS_MISSING_VALUE */
-
-    char VolumeEffect[2];          /* permitted to be \0\0 */
-    char PanningEffect[2];         /* permitted to be \0\0 */
-
-    /* If Type is XRNS_NOTE_EFFECT, these will be populated and valid.
-     * Otherwise, these will both be populated and set if a Renoise 3.x file
-     * was loaded and sample-effects were found. Otherwise these will be
-     * XRNS_MISSING_VALUE.
-     */
-    unsigned int  EffectTypeIdx;
-    unsigned int  EffectValue;
-
-    char EffectTypeC[2];
-
-} xrns_note;
-
-void InitNote(xrns_note *Note)
-{
-    Note->Type          = XRNS_NOTE_REAL;
-    Note->Note          = XRNS_NOTE_BLANK;
-    Note->Column        = 0;
-    Note->Line          = 0;
-    Note->Instrument    = XRNS_MISSING_VALUE;
-    Note->Volume        = XRNS_MISSING_VALUE;
-    Note->Panning       = XRNS_MISSING_VALUE;
-    Note->Delay         = XRNS_MISSING_VALUE;
-    Note->EffectTypeIdx = XRNS_MISSING_VALUE;
-    Note->EffectValue   = XRNS_MISSING_VALUE;
-}
-
-typedef struct
-{
-    unsigned int   NumNotes;
-    char           bIsAlias;
-    unsigned int   AliasIdx;
-    xrns_note     *Notes;
-    unsigned int   NumEnvelopes;
-    xrns_envelope *Envelopes;
-} xrns_track;
-
-typedef struct
-{
-    unsigned int     NumColumns;
-    unsigned int     NumEffectColumns;
-    char             bIsGroup;
-    unsigned int     WrapsNPreviousTracks;
-    unsigned int     Depth;
-    char            *Name;
-    float            InitialPreVolume;
-    float            InitialPostVolume;
-    float            InitialPanning;
-    float            PostPanning;
-    float            InitialWidth;
-    unsigned int     NumDSPEffectUnits;
-    dsp_effect_desc *DSPEffectDescs;
-} xrns_track_desc;
-
-typedef struct
-{
-    char          *Name;
-    unsigned int   NumberOfLines;
-    xrns_track    *Tracks;
-} xrns_pattern;
-
-typedef struct 
-{
-    unsigned int  PatternIdx;
-    char         *SectionName;
-    char          bIsSectionStart;
-    unsigned int  NumMutedTracks;
-    unsigned int *MutedTracks;
-} xrns_pattern_sequence_entry;
-
-typedef struct
-{
-    int                           RenoiseVersion;
-    float                         BeatsPerMin;
-    int                           LinesPerBeat;
-    unsigned int                  TicksPerLine;
-    char                         *SongName; 
-    char                         *Artist;
-    unsigned int                  NumInstruments;
-    xrns_instrument              *Instruments;
-    unsigned int                  NumPatterns;
-    xrns_pattern                 *PatternPool;
-    unsigned int                  PatternSequenceLength;
-    xrns_pattern_sequence_entry  *PatternSequence;
-    unsigned int                  NumTracks;
-    xrns_track_desc              *Tracks;
-    unsigned int                  TotalColumns;
-} xrns_document;
-
-/* ====================================================================================================================
- * ====================================================================================================================
- * ====================================================================================================================
- * 
- * ====================================================================================================================
- */
 
 #define XRNS_KERNAL(_x) char _x;
 typedef struct
@@ -1790,50 +2213,6 @@ void UpdateXMLInstrumentTags(xrns_tag_set *t, char *Tag, int BeginOtherwiseEnd)
 
 #undef XRNS_KERNAL
 
-#define GZEROED(_type, _name) _type _name; memset(&_name, 0, sizeof(_type));
-
-/* galloc for persistent allocations
- */
-typedef struct
-{
-    char   *BaseAddress;
-    char   *CurrentAddress;
-    /* for debugging only */
-    size_t  MaximumSizeBytes;
-} galloc_ctx;
-
-void *galloc(galloc_ctx *g, size_t Bytes)
-{
-    if (g->CurrentAddress - g->BaseAddress > g->MaximumSizeBytes)
-        return g->BaseAddress;
-
-    char *OutPtr = g->CurrentAddress;
-    g->CurrentAddress += Bytes;
-    return OutPtr;
-}
-
-void *galloc_aligned(galloc_ctx *g, size_t Bytes, int AlignmentBytes)
-{
-    char *OutPtr;
-    while ((unsigned long long) g->CurrentAddress % AlignmentBytes)
-    {
-        g->CurrentAddress++;
-    }
-
-    OutPtr = g->CurrentAddress;
-    g->CurrentAddress += Bytes;
-    
-    return OutPtr;
-}
-
-void *GallocStringFromXML(galloc_ctx *g, xml_res *r)
-{
-    unsigned int Length = XMLTagLength(r->value);
-    void *Dest = galloc(g, Length + 1);
-    CopyBytesAppendingNULL(Dest, r->value, Length);
-    return Dest;
-}
-
 void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
 {
     TracyCZoneN(ctx, "XRNS Get Counts", 1);
@@ -1863,7 +2242,11 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
 
             if (Counts->RenoiseVersion == 3)
             {
-                if (t.Instruments && !t.PhraseGenerator && t.ModulationSet && !bCountedModulationDevice && xmltagmatch(r.name, "SampleEnvelopeModulationDevice"))
+                if (    t.Instruments 
+                    && !t.PhraseGenerator 
+                    && t.ModulationSet 
+                    && !bCountedModulationDevice 
+                    && xmltagmatch(r.name, "SampleEnvelopeModulationDevice"))
                 {
                     Counts->NumModulationSetsPerInstrument[Counts->NumInstruments]++;
                     bCountedModulationDevice = 1;
@@ -1878,7 +2261,7 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
                 }
             }
 
-            if (   (Counts->RenoiseVersion == 2 && (t.Instruments && !t.Samples && xmltagmatch(r.name, "NoteOnMapping")))
+            if ((Counts->RenoiseVersion == 2 && (t.Instruments && !t.Samples && xmltagmatch(r.name, "NoteOnMapping")))
                 || (Counts->RenoiseVersion == 3 && (t.Sample && xmltagmatch(r.name, "Mapping") && !t.GlobalProperties)))
             {
                 Counts->NumSampleSplitMapsPerInstrument[Counts->NumInstruments]++;
@@ -1915,14 +2298,20 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
 
             if (   !bTracksCounted
                 && t.Tracks
-                && (xmltagmatch(r.name, "SequencerTrack") || xmltagmatch(r.name, "SequencerGroupTrack") || xmltagmatch(r.name, "SequencerMasterTrack"))
+                && (  xmltagmatch(r.name, "SequencerTrack") 
+                   || xmltagmatch(r.name, "SequencerGroupTrack") 
+                   || xmltagmatch(r.name, "SequencerMasterTrack")
+                   )
                 && !t.PhraseGenerator
                 )
             {
                 Counts->NumTracks++;
             }
 
-            if (xmltagmatch(r.name, "PatternTrack") || xmltagmatch(r.name, "PatternGroupTrack") || xmltagmatch(r.name, "PatternMasterTrack"))
+            if (  xmltagmatch(r.name, "PatternTrack") 
+               || xmltagmatch(r.name, "PatternGroupTrack") 
+               || xmltagmatch(r.name, "PatternMasterTrack")
+               )
             {
                 xrns_magic_write_int(&Counts->EnvelopesPerTrackPerPattern, NumTrackEnvelopes, xx);
                 xx++;
@@ -2148,7 +2537,15 @@ void ParseInstruments
 
         if (r.event_type == XML_EVENT_ELEMENT_END)
         {
-            if (!xdoc->Instruments[InstrumentIdx].Name && !t->Samples && t->Instrument && xmltagmatch(r.name, "Name") && !t->PluginProperties && !t->GlobalProperties && !t->ModulationSets && !t->PluginGenerator)
+            if (   !xdoc->Instruments[InstrumentIdx].Name 
+                && !t->Samples 
+                && t->Instrument 
+                && xmltagmatch(r.name, "Name") 
+                && !t->PluginProperties 
+                && !t->GlobalProperties 
+                && !t->ModulationSets 
+                && !t->PluginGenerator
+               )
             {
                 xdoc->Instruments[InstrumentIdx].Name = GallocStringFromXML(g, &r);
             } 
@@ -2252,8 +2649,19 @@ void ParseInstruments
                     SliceRegionIdx++;
                 }
             }
-            if (  (xdoc->RenoiseVersion == 2 && (t->SampleSplitMap && t->NoteOnMapping && !t->SampleEnvelopes && !t->PluginProperties))
-                ||(xdoc->RenoiseVersion == 3 && (t->Sample && t->Mapping && !t->GlobalProperties)))
+
+            int bNewSplitMapV2 = (   xdoc->RenoiseVersion == 2 
+                                 &&  t->SampleSplitMap 
+                                 &&  t->NoteOnMapping 
+                                 && !t->SampleEnvelopes 
+                                 && !t->PluginProperties);
+
+            int bNewSplitMapV3 = (   xdoc->RenoiseVersion == 3
+                                 &&  t->Sample 
+                                 &&  t->Mapping 
+                                 && !t->GlobalProperties);
+
+            if (bNewSplitMapV2 || bNewSplitMapV3)
             {
                 xrns_ssm *SampleSM = &xdoc->Instruments[InstrumentIdx].SampleSplitMaps[SampleSplitIdx];
 
@@ -2305,14 +2713,17 @@ void ParseInstruments
 
                 if (xdoc->Instruments[InstrumentIdx].NumModulationSets && xmltagmatch(r.name, "PitchModulationRange"))
                 {
-                    xrns_modulation_set *ModulationSet = &xdoc->Instruments[InstrumentIdx].ModulationSets[ModulationSetIdx];
+                    xrns_modulation_set *ModulationSet 
+                        = &xdoc->Instruments[InstrumentIdx].ModulationSets[ModulationSetIdx];
                     ModulationSet->PitchModulationRange = ParseIntegerFromXML(r.value);
                 }
 
                 if (t->SampleEnvelopeModulationDevice)
                 {
+                    xrns_modulation_set *ModulationSet 
+                        = &xdoc->Instruments[InstrumentIdx].ModulationSets[ModulationSetIdx];
+
                     bParsingTrackEnvelope = 0;
-                    xrns_modulation_set *ModulationSet = &xdoc->Instruments[InstrumentIdx].ModulationSets[ModulationSetIdx];
 
                     if (xmltagmatch(r.name, "Target"))
                     {
@@ -2361,7 +2772,11 @@ void ParseInstruments
                 SampleIdx++;
             }
             else if (  (xdoc->RenoiseVersion == 2 && xmltagmatch(r.name, "NoteOnMapping"))
-                    || (xdoc->RenoiseVersion == 3 && xmltagmatch(r.name, "Mapping") && !t->GlobalProperties && !t->PhraseGenerator)
+                    || (   xdoc->RenoiseVersion == 3 
+                        && xmltagmatch(r.name, "Mapping") 
+                        && !t->GlobalProperties 
+                        && !t->PhraseGenerator
+                       )
                     )
             {
                 SampleSplitIdx++;
@@ -2626,7 +3041,12 @@ void ParseTracks
             {
                 xdoc->Tracks[SequenceIdx].NumEffectColumns = ParseIntegerFromXML(r.value);
             }
-            else if (t->TrackMixerDevice || t->MasterTrackMixerDevice || t->SequencerTrackDevice || t->SequencerMasterTrackDevice || t->GroupTrackMixerDevice)
+            else if (   t->TrackMixerDevice
+                     || t->MasterTrackMixerDevice 
+                     || t->SequencerTrackDevice 
+                     || t->SequencerMasterTrackDevice 
+                     || t->GroupTrackMixerDevice
+                    )
             {
                 if (t->Volume)
                 {
@@ -2775,7 +3195,9 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
         Instrument->NumSampleSplitMaps = Counts.NumSampleSplitMapsPerInstrument[i];
         Instrument->SampleSplitMaps    = galloc(g, sizeof(xrns_ssm) * Counts.NumSampleSplitMapsPerInstrument[i]);
         Instrument->NumModulationSets  = Counts.NumModulationSetsPerInstrument[i];
-        Instrument->ModulationSets     = galloc(g, sizeof(xrns_modulation_set) * Counts.NumModulationSetsPerInstrument[i]);
+
+        Instrument->ModulationSets     
+            = galloc(g, sizeof(xrns_modulation_set) * Counts.NumModulationSetsPerInstrument[i]);
 
         Instrument->NumSliceRegions    = Counts.NumSliceRegionsPerInstrument[i];
         Instrument->SliceRegions       = galloc(g, sizeof(unsigned int) * Counts.NumSliceRegionsPerInstrument[i]);
@@ -2800,7 +3222,9 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
         xrns_pattern *Pattern = &xdoc->PatternPool[i];
         for (int xx = 0; xx < xdoc->NumTracks; xx++)
         {
-            Pattern->Tracks[xx].NumEnvelopes = ((int*)Counts.EnvelopesPerTrackPerPattern.Memory)[i*xdoc->NumTracks + xx];
+            Pattern->Tracks[xx].NumEnvelopes
+                = ((int*)Counts.EnvelopesPerTrackPerPattern.Memory)[i*xdoc->NumTracks + xx];
+
             Pattern->Tracks[xx].Envelopes    = galloc(g, sizeof(xrns_envelope) * Pattern->Tracks[xx].NumEnvelopes);
         }
     }
@@ -2872,7 +3296,10 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
             if (t.Patterns)
             {
                 xrns_track *Track = &xdoc->PatternPool[PatternIdx].Tracks[TrackIdx];
-                if (xmltagmatch(r.name, "PatternTrack") || xmltagmatch(r.name, "PatternMasterTrack") || xmltagmatch(r.name, "PatternGroupTrack"))
+                if (   xmltagmatch(r.name, "PatternTrack")
+                    || xmltagmatch(r.name, "PatternMasterTrack") 
+                    || xmltagmatch(r.name, "PatternGroupTrack")
+                   )
                 {
                     TrackIdx++;
                     ColumnIdx = 0;
@@ -3215,17 +3642,17 @@ int populateXRNSDocument(galloc_ctx *g, void *mem, size_t mem_sz, xrns_document 
     
     FarmPooledThreads(Workers, Decoding);
 
-    //&
     for (i = 0; i < Decoding->NumJobs; i++)
     {
         xrns_job *Job = &Decoding->Jobs[i];
         if (Job->FreeData)
         {
             xrns_sample *Sample = (xrns_sample *) Job->Result;
-            xdoc->Instruments[Sample->InstrumentNumber].Samples[Sample->SampleNumber].PCM           = Sample->PCM;
-            xdoc->Instruments[Sample->InstrumentNumber].Samples[Sample->SampleNumber].SampleRateHz  = Sample->SampleRateHz;
-            xdoc->Instruments[Sample->InstrumentNumber].Samples[Sample->SampleNumber].NumChannels   = Sample->NumChannels;
-            xdoc->Instruments[Sample->InstrumentNumber].Samples[Sample->SampleNumber].LengthSamples = Sample->LengthSamples;
+            xrns_sample *Dest   = &xdoc->Instruments[Sample->InstrumentNumber].Samples[Sample->SampleNumber];
+            Dest->PCM           = Sample->PCM;
+            Dest->SampleRateHz  = Sample->SampleRateHz;
+            Dest->NumChannels   = Sample->NumChannels;
+            Dest->LengthSamples = Sample->LengthSamples;
             free(Sample);
         }
     }
@@ -3238,6 +3665,12 @@ int populateXRNSDocument(galloc_ctx *g, void *mem, size_t mem_sz, xrns_document 
     return 1;
 }
 
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
+ * XRNS Playback Engine 
+ * ====================================================================================================================
+ */
 
 // @Optimization: Remove this conditional.
 #define XRNS_ACCESS_STEREO_SAMPLE(x) ((x >= 0 && x < MaxLengthSamples*2) ? pcm[x] : 0)
@@ -3507,45 +3940,6 @@ void InitialiseSampler(xrns_sampler *Sampler)
     ResetLerp(&Sampler->CurrentVolume,  0x100, 0.96f);
 }
 
-typedef struct
-{
-    float       *OutputRingBuffer;
-    int          RingBufferReadPtr;
-    int          RingBufferWritePtr;
-    int          RingBufferFreeSamples;
-    int          RingBufferSz;
-} xrns_ringbuffer;
-
-void InitRingBuffer(xrns_ringbuffer *Ringbuffer)
-{
-    Ringbuffer->RingBufferSz          = 1<<13;
-    Ringbuffer->RingBufferWritePtr    = 0;
-    Ringbuffer->RingBufferReadPtr     = 0;
-    Ringbuffer->RingBufferFreeSamples = Ringbuffer->RingBufferSz;
-    Ringbuffer->OutputRingBuffer      = malloc(Ringbuffer->RingBufferSz * 2 * sizeof(float));
-}
-
-void FreeRingBuffer(xrns_ringbuffer *Ringbuffer)
-{
-    free(Ringbuffer->OutputRingBuffer);
-}
-
-void PushRingBuffer(xrns_ringbuffer *Ringbuffer, float *Samples, unsigned int NumSamples)
-{   
-    int i = 0;
-    while (i < NumSamples)
-    {
-        float *p_track_samples = &Ringbuffer->OutputRingBuffer[2 * Ringbuffer->RingBufferWritePtr];
-
-        p_track_samples[0] = Samples[2*i + 0];
-        p_track_samples[1] = Samples[2*i + 1];
-
-        Ringbuffer->RingBufferWritePtr = (Ringbuffer->RingBufferWritePtr + 1) % Ringbuffer->RingBufferSz;
-        Ringbuffer->RingBufferFreeSamples--;
-        i++;
-    }
-}
-
 typedef struct 
 {
     LerpFloat        CurrentPreVolume;
@@ -3657,25 +4051,33 @@ struct _XRNSPlaybackState
     pooled_threads_ctx *Workers;
 
     int bStopAtEndOfSong;
-
 };
 
 static double PresentLineDuration(XRNSPlaybackState *xstate)
 {
-    if (!xstate->CurrentLinesPerBeat)    return 1.0f;
-    if (!xstate->CurrentBPM)             return 1.0f;
-    if (!xstate->CurrentBPMAugmentation) return 1.0f;
+    if (!xstate->CurrentLinesPerBeat)    return 1.0;
+    if (!xstate->CurrentBPM)             return 1.0;
+    if (!xstate->CurrentBPMAugmentation) return 1.0;
 
-    return xstate->OutputSampleRate * (60.0 / ((double) xstate->CurrentLinesPerBeat * (double) xstate->CurrentBPM * (xstate->CurrentBPMAugmentation / 100.0f)));
+    double LPM = (double) xstate->CurrentLinesPerBeat 
+               * (double) xstate->CurrentBPM 
+               * (xstate->CurrentBPMAugmentation / 100.0);
+
+    return xstate->OutputSampleRate * (60.0 / LPM);
 }
 
 static double PresentTickDuration(XRNSPlaybackState *xstate)
 {
-    if (!xstate->CurrentLinesPerBeat)    return 1.0f;
-    if (!xstate->CurrentBPM)             return 1.0f;
-    if (!xstate->CurrentBPMAugmentation) return 1.0f;
+    if (!xstate->CurrentLinesPerBeat)    return 1.0;
+    if (!xstate->CurrentBPM)             return 1.0;
+    if (!xstate->CurrentBPMAugmentation) return 1.0;
 
-    return xstate->OutputSampleRate * (60.0 / ((double) xstate->CurrentLinesPerBeat * (double) xstate->CurrentBPM * (double) xstate->CurrentTicksPerLine * (xstate->CurrentBPMAugmentation / 100.0f)));
+    double TPM = (double) xstate->CurrentLinesPerBeat 
+               * (double) xstate->CurrentBPM 
+               * (double) xstate->CurrentTicksPerLine 
+               * (xstate->CurrentBPMAugmentation / 100.0);
+
+    return xstate->OutputSampleRate * (60.0 / TPM);
 }
 
 void RecomputeDurations(XRNSPlaybackState *xstate)
@@ -4169,7 +4571,12 @@ double WalkEnvelope(XRNSPlaybackState *xstate,
     return InterpolatedVal;
 }
 
-void PerformNewNoteActionOnSamplerBank(XRNSPlaybackState *xstate, xrns_document *xdoc, xrns_sampler_bank *SamplerBank, int bForceNoteOff)
+void PerformNewNoteActionOnSamplerBank
+    (XRNSPlaybackState *xstate
+    ,xrns_document *xdoc
+    ,xrns_sampler_bank *SamplerBank
+    ,int bForceNoteOff
+    )
 {
     /* a new note was hit on this column, so go and perform the correct
      * new note events on the active samplers.
@@ -4220,7 +4627,8 @@ void PerformNewNoteActionOnSamplerBank(XRNSPlaybackState *xstate, xrns_document 
                 if (   xdoc->Instruments[Sampler->CurrentInstrument].NumModulationSets
                     && (Sample->ModulationSetIndex != -1))
                 {
-                    xrns_modulation_set *ModulationSet = &xdoc->Instruments[Sampler->CurrentInstrument].ModulationSets[Sample->ModulationSetIndex];
+                    xrns_modulation_set *ModulationSet 
+                        = &xdoc->Instruments[Sampler->CurrentInstrument].ModulationSets[Sample->ModulationSetIndex];
 
                     if (ModulationSet->bVolumeEnvelopePresent)
                     {
@@ -4233,7 +4641,9 @@ void PerformNewNoteActionOnSamplerBank(XRNSPlaybackState *xstate, xrns_document 
 
                         if (ModulationSet->Volume.ReleaseValue != 0)
                         {
-                            PlaybackState->CrossFade = (32/xstate->CurrentBPM) * (xstate->OutputSampleRate * 240) / ModulationSet->Volume.ReleaseValue;
+                            float CrossFade = (32/xstate->CurrentBPM) * (xstate->OutputSampleRate * 240);
+
+                            PlaybackState->CrossFade = CrossFade / ModulationSet->Volume.ReleaseValue;
                             PlaybackState->CrossFadeDuration = PlaybackState->CrossFade;
                         }
                         else
@@ -4607,7 +5017,12 @@ void CreateXRNSPlaybackState(galloc_ctx *g, XRNSPlaybackState *xstate, xrns_docu
 }
 
 /* returns true if a pattern cue was spent */
-int GetNextPatternAndRowIndex(XRNSPlaybackState *xstate, unsigned int *NextPatternIndex, unsigned int *NextRowIndex, int *bEndOfSong)
+int GetNextPatternAndRowIndex
+    (XRNSPlaybackState *xstate
+    ,unsigned int      *NextPatternIndex
+    ,unsigned int      *NextRowIndex
+    ,int               *bEndOfSong
+    )
 {
     int PatternCueObeyed = 0;
     unsigned int patternIndex = xstate->xdoc->PatternSequence[xstate->CurrentPatternIndex].PatternIdx;
@@ -4650,7 +5065,6 @@ int GetNextPatternAndRowIndex(XRNSPlaybackState *xstate, unsigned int *NextPatte
     return PatternCueObeyed;
 }
 
-
 void xrns_perform_tick_processing(XRNSPlaybackState *xstate)
 {
     int track, col, s;
@@ -4674,14 +5088,19 @@ void xrns_perform_tick_processing(XRNSPlaybackState *xstate)
                     /* glide towards the destination note at the present speed, but divide the speed up
                      * by the ticks.
                      */
-                    int PitchDifference = (16 * (SamplerBank->PitchToGlideTo - Sampler->CurrentNote)) + (int)Sampler->CurrentSlideDest;
+                    int PitchDifference = (16 * (SamplerBank->PitchToGlideTo - Sampler->CurrentNote)) 
+                                        + (int)Sampler->CurrentSlideDest;
+
                     int WiggleDifference = PitchDifference - Sampler->GlideNote;
 
                     if (!Sampler->bInstantSlide)
                     {
+                        float GlideAdjustment = ((float) Sampler->PitchSlideSpeed)
+                                              / ((float) xstate->CurrentTicksPerLine);
+
                         if (WiggleDifference > 0)
                         {
-                            Sampler->GlideNote += (float) Sampler->PitchSlideSpeed / ((float) xstate->CurrentTicksPerLine);
+                            Sampler->GlideNote += GlideAdjustment;
                             if (Sampler->GlideNote > PitchDifference)
                             {
                                 Sampler->GlideNote = PitchDifference;
@@ -4689,7 +5108,7 @@ void xrns_perform_tick_processing(XRNSPlaybackState *xstate)
                         }
                         else
                         {
-                            Sampler->GlideNote -= (float) Sampler->PitchSlideSpeed / ((float) xstate->CurrentTicksPerLine);
+                            Sampler->GlideNote -= GlideAdjustment;
                             if (Sampler->GlideNote < PitchDifference)
                             {
                                 Sampler->GlideNote = PitchDifference;
@@ -4713,7 +5132,8 @@ void xrns_perform_tick_processing(XRNSPlaybackState *xstate)
                         /* Technically this is a little bit suspect, due to floating point precision. The alpha mixing
                          * method ensures the slide finished on the right thing at least.
                          */
-                        Sampler->CurrentSlideOffset += Sampler->CurrentSlideDest / ((float) xstate->CurrentTicksPerLine - 1.0f);
+                        Sampler->CurrentSlideOffset += Sampler->CurrentSlideDest 
+                                                     / ((float) xstate->CurrentTicksPerLine - 1.0f);
                         Sampler->SlideTick++;
                     }
                 }
@@ -4722,7 +5142,8 @@ void xrns_perform_tick_processing(XRNSPlaybackState *xstate)
 
                 if (Sampler->bPanningSlide)
                 {
-                    Sampler->CurrentPanning.Target += Sampler->PanningSlideAmount * 8.0f / ((float) xstate->CurrentTicksPerLine);
+                    Sampler->CurrentPanning.Target += Sampler->PanningSlideAmount * 8.0f 
+                                                    / ((float) xstate->CurrentTicksPerLine);
 
                     if (Sampler->CurrentPanning.Target < 0.0f)
                     {
@@ -4765,7 +5186,9 @@ void xrns_perform_tick_processing(XRNSPlaybackState *xstate)
                 /* Attempt to provide Vibrato.... */
                 if (Sampler->CurrentVibratoDepth != 0)
                 {
-                    float m = -1.0f * sin(2.0f * (3.14159265f) * Sampler->CurrentVibratoSpeed * (Sampler->VibratoTick) / ((float) xstate->CurrentTicksPerLine * 12.0f));
+                    float m = -1.0f * sin(2.0f * (3.14159265f) * Sampler->CurrentVibratoSpeed * (Sampler->VibratoTick) 
+                            / ((float) xstate->CurrentTicksPerLine * 12.0f));
+
                     Sampler->VibratoOffset = m * (200.0f * Sampler->CurrentVibratoDepth) / 16.0f;
                     Sampler->VibratoTick += 1.0f;
                 }
@@ -4773,8 +5196,11 @@ void xrns_perform_tick_processing(XRNSPlaybackState *xstate)
                 /* Tremolo is kind of the same? */
                 if (Sampler->CurrentTremoloDepth)
                 {
-                    float m = cos(2.0f * (3.14159265f) * Sampler->CurrentTremoloSpeed * (Sampler->TremoloTick + 0.5f) / ((float) (xstate->CurrentTicksPerLine) * 24.0f + 1.0f));
-                    Sampler->TremoloAmount = ((0xF - Sampler->CurrentTremoloDepth)/((float) 0xF)) + m*m * (Sampler->CurrentTremoloDepth/((float) 0xF));
+                    float m = cos(2.0f * (3.14159265f) * Sampler->CurrentTremoloSpeed * (Sampler->TremoloTick + 0.5f) 
+                            / ((float) (xstate->CurrentTicksPerLine) * 24.0f + 1.0f));
+
+                    Sampler->TremoloAmount = ((0xF - Sampler->CurrentTremoloDepth)/((float) 0xF)) 
+                                           + m * m * (Sampler->CurrentTremoloDepth/((float) 0xF));
                     Sampler->TremoloTick += 1.0f;
                 }
 
@@ -5084,7 +5510,8 @@ void FinaliseEffectCommands(XRNSPlaybackState *xstate, int track_idx)
                         }
                         else
                         {
-                            LengthSamples = Instrument->Samples[PlaybackState->CurrentSample + 1].SampleStart - Sample->SampleStart;
+                            xrns_sample *NextSample = &Instrument->Samples[PlaybackState->CurrentSample + 1];
+                            LengthSamples = NextSample->SampleStart - Sample->SampleStart;
                         }
 
                         PlaybackState->PlaybackPosition = round(LengthSamples * DigitalPercent/(256.0f));
@@ -5155,7 +5582,13 @@ void FinaliseEffectCommands(XRNSPlaybackState *xstate, int track_idx)
     }
 }
 
-void SetEffectCommandOnColumnSamplers(XRNSPlaybackState *xstate, int track_idx, int col_idx, xrns_note *Effect, int bMainEffectColumn)
+void SetEffectCommandOnColumnSamplers
+    (XRNSPlaybackState *xstate
+    ,int track_idx
+    ,int col_idx
+    ,xrns_note *Effect
+    ,int bMainEffectColumn
+    )
 {
     int i, j;
     int cid;
@@ -5557,7 +5990,7 @@ void SetEffectCommandOnColumnSamplers(XRNSPlaybackState *xstate, int track_idx, 
                     Sampler->RetriggerRate = value % 16;
                     int RetriggerVolumeFactor = value / 16;
 
-                    int NumRetrigs = ((xstate->CurrentTicksPerLine + Sampler->RetriggerRate - 1)/Sampler->RetriggerRate);
+                    int NumRetrigs = (xstate->CurrentTicksPerLine + Sampler->RetriggerRate - 1)/Sampler->RetriggerRate;
 
                     Sampler->WetVolume = Sampler->OriginalNote.Volume;
 
@@ -5738,14 +6171,16 @@ void xrns_update_notes_and_effects(XRNSPlaybackState *xstate, int bFreshPattern)
 
         if (bFreshPattern)
         {
+            xrns_pattern_sequence_entry *Pattern = &xstate->xdoc->PatternSequence[xstate->CurrentPatternIndex];
+
             /* we hit row 0 of a new pattern. */
             TrackState->CurrentNoteIndex = 0;
 
             /* Tracks can be muted depending on where we are in the sequence. */
             xstate->TrackStates[track]->bIsMuted = 0;
-            for (m = 0; m < xstate->xdoc->PatternSequence[xstate->CurrentPatternIndex].NumMutedTracks; m++)
+            for (m = 0; m < Pattern->NumMutedTracks; m++)
             {
-                TrackState->bIsMuted |= (xstate->xdoc->PatternSequence[xstate->CurrentPatternIndex].MutedTracks[m] == (unsigned int) track);
+                TrackState->bIsMuted |= (Pattern->MutedTracks[m] == (unsigned int) track);
             }
         }
 
@@ -6009,7 +6444,12 @@ void xrns_update_notes_and_effects(XRNSPlaybackState *xstate, int bFreshPattern)
     xstate->NumCallerNotes = 0;
 }
 
-static inline double SampleLoopWrapping(xrns_sample *Sample, xrns_sample_playback_state *PlaybackState, double ProposedNewPosition)
+static inline double 
+SampleLoopWrapping
+    (xrns_sample *Sample
+    ,xrns_sample_playback_state *PlaybackState
+    ,double ProposedNewPosition
+    )
 {
     int bFullyUnwound = 0;
 
@@ -6316,7 +6756,13 @@ XRNS_DLL_EXPORT XRNSPlaybackState * xrns_create_playback_state_from_bytes(void *
     TracyCZoneEnd(ctx);
 
     unsigned long long BytesUsed = galloc_context->CurrentAddress - galloc_context->BaseAddress;
-    printf("GALLOC Using %llu Bytes (%.2f MBytes), the maximum is %.2f\n", BytesUsed, BytesUsed / ((float) Megabytes(1)), galloc_context->MaximumSizeBytes / ((float) Megabytes(1)));
+
+    printf
+        ("GALLOC Using %llu Bytes (%.2f MBytes), the maximum is %.2f\n"
+        ,BytesUsed, BytesUsed / ((float) Megabytes(1))
+        ,galloc_context->MaximumSizeBytes / ((float) Megabytes(1))
+        );
+
     if (BytesUsed > galloc_context->MaximumSizeBytes)
     {
         return NULL;
@@ -6337,7 +6783,13 @@ XRNS_DLL_EXPORT XRNSPlaybackState * xrns_create_playback_state(char *p_filename)
     return RetState;
 }
 
-int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAfterLine, int bExitingBeforeLine, int MaximumSamples)
+int run_engine
+    (XRNSPlaybackState *xstate
+    ,int                bExitingAfterTick
+    ,int                bExitingAfterLine
+    ,int                bExitingBeforeLine
+    ,int                MaximumSamples
+    )
 {
     TracyCZoneN(main_ctx, "Run Engine", 1);
 
@@ -6432,7 +6884,9 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
 
             double DurationOfThisLine2 = xstate->CurrentLineDuration;
             float ProgressThroughPatternIn256thRows = xstate->CurrentRow * 256;
-            ProgressThroughPatternIn256thRows += 256.0 - (256 * (xstate->LocationOfNextLine - xstate->CurrentSample) / DurationOfThisLine2);
+
+            ProgressThroughPatternIn256thRows 
+                += 256.0 - (256 * (xstate->LocationOfNextLine - xstate->CurrentSample) / DurationOfThisLine2);
 
             /* handle the track automation curves. */
             for (i = 0; i < TrackData->NumEnvelopes; i++)
@@ -6528,7 +6982,9 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                     {
                         Sampler->bQPrepped = 0;
 
-                        if (Sampler->OriginalNote.Note == XRNS_NOTE_BLANK || Sampler->OriginalNote.Note == XRNS_MISSING_VALUE)
+                        int OriginalNote = Sampler->OriginalNote.Note;
+
+                        if (OriginalNote == XRNS_NOTE_BLANK || OriginalNote == XRNS_MISSING_VALUE)
                         {
                             if (Sampler->OriginalNote.Volume <= 0x80)
                             {
@@ -6556,18 +7012,31 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                                 }
                             }
 
-                            SetEffectCommandOnColumnSamplers(xstate, track, Sampler->OriginalNote.Column, &Sampler->OriginalNote, 0);
+                            SetEffectCommandOnColumnSamplers
+                                (xstate
+                                ,track
+                                ,Sampler->OriginalNote.Column
+                                ,&Sampler->OriginalNote
+                                ,0
+                                );
                         }
                         else
                         {
                             if (Sampler->bHitWithGCommand)
                             {
-                                SamplerBank->Samplers[SamplerBank->MostRecentlyPlayingSampler].CurrentVolume.Target = Sampler->CurrentVolume.Target;
-                                SamplerBank->Samplers[SamplerBank->MostRecentlyPlayingSampler].CurrentPanning.Target = Sampler->CurrentPanning.Target;
+                                int MostRecentlyPlayingSampler = SamplerBank->MostRecentlyPlayingSampler;
+                                xrns_sampler *RecentSampler = &SamplerBank->Samplers[MostRecentlyPlayingSampler];
+                                RecentSampler->CurrentVolume.Target = Sampler->CurrentVolume.Target;
+                                RecentSampler->CurrentPanning.Target = Sampler->CurrentPanning.Target;
                             }
                             else
                             {
-                                PerformNewNoteActionOnSamplerBank(xstate, xstate->xdoc, SamplerBank, Sampler->bIsNoteOff);
+                                PerformNewNoteActionOnSamplerBank
+                                    (xstate
+                                    ,xstate->xdoc
+                                    ,SamplerBank
+                                    ,Sampler->bIsNoteOff
+                                    );
 
                                 if (Sampler->PlaybackStates[0].CurrentSample != -1)
                                 {
@@ -6597,7 +7066,7 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                         xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
                         if (!PlaybackState->bPlaying) continue;
                         SampleIndex = PlaybackState->CurrentSample;
-                        if (SampleIndex == -1) continue; /* in this condition, the note simply isn't mapped to any sample. */
+                        if (SampleIndex == -1) continue;
 
                         xrns_instrument *Instrument = &xstate->xdoc->Instruments[Sampler->CurrentInstrument];
                         BaseNote = PlaybackState->CurrentBaseNote;
@@ -6656,12 +7125,20 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
 
                         if (Instrument->NumModulationSets && (Sample->ModulationSetIndex != -1))
                         {
-                            xrns_modulation_set *ModulationSet = &Instrument->ModulationSets[Sample->ModulationSetIndex];
+                            xrns_modulation_set *ModulationSet  
+                                = &Instrument->ModulationSets[Sample->ModulationSetIndex];
 
                             xrns_envelope *Envelope = &ModulationSet->Volume;
                             if (Envelope && ModulationSet->bVolumeEnvelopePresent)
                             {
-                                VolumePercent = WalkEnvelope(xstate, Envelope, &PlaybackState->VolumeEnvelope, 1.0/(xstate->OutputSampleRate), PlaybackState->bIsCrossFading);
+                                VolumePercent = WalkEnvelope
+                                    (xstate
+                                    ,Envelope
+                                    ,&PlaybackState->VolumeEnvelope
+                                    ,1.0/(xstate->OutputSampleRate)
+                                    ,PlaybackState->bIsCrossFading
+                                    );
+
                                 bOnLastEnvelopePoint = OnLastEnvelopePoint(Envelope, &PlaybackState->VolumeEnvelope);
                             }
                         }
@@ -6712,7 +7189,8 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                             }
                             else
                             {
-                                IntroCrossFadeLevel *= PlaybackState->IntroCrossFade / ((float) PlaybackState->IntroCrossFadeDuration);
+                                IntroCrossFadeLevel *= PlaybackState->IntroCrossFade 
+                                                     / ((float) PlaybackState->IntroCrossFadeDuration);
                             }
                         }                    
 
@@ -6727,7 +7205,8 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
 
                         /* Various panning gains are possible to see here.
                          *
-                         * 1. Samples may have a static pan value (-50 <-> 50) set. (values in the XRNS file will be -1.0 vs. 1.0)
+                         * 1. Samples may have a static pan value (-50 <-> 50) set. 
+                         *    (values in the XRNS file will be -1.0 vs. 1.0)
                          * 2. Samples may have a panning modulation curve that maps into the range
                          *    (-50 <-> 50).
                          * 3. Samplers may have a current panning effect applied in the pattern data. This
@@ -6742,22 +7221,34 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
 
                         /* Handle panning from sources 1, 2, 3, 4 */
                         // @Optimization: Maybe don't do these every sample?
+
+                        int PostPanningValue = xstate->TrackStates[track]->CurrentPanning.Val
+
                         xrns_panning_gains SamplePan     = PanningGainFromZeroToOne(Sample->Panning);
                         xrns_panning_gains ModulationPan = {1.0f, 1.0f};
                         xrns_panning_gains SamplerPan    = PanningGainFromColNumber(Sampler->CurrentPanning.Val);
-                        xrns_panning_gains TrackPan      = PanningGainFromNeg1To1(xstate->TrackStates[track]->CurrentPanning.Val);
+                        xrns_panning_gains TrackPan      = PanningGainFromNeg1To1(PostPanningValue);
 
                         RunLerp(&Sampler->CurrentPanning);
                         RunLerp(&Sampler->CurrentVolume);
 
                         if (Instrument->NumModulationSets && (Sample->ModulationSetIndex != -1))
                         {
-                            xrns_modulation_set *ModulationSet = &Instrument->ModulationSets[Sample->ModulationSetIndex];
+                            xrns_modulation_set *ModulationSet 
+                                = &Instrument->ModulationSets[Sample->ModulationSetIndex];
+
                             xrns_envelope *Envelope = &ModulationSet->Panning;
 
                             if (Envelope && ModulationSet->bPanningEnvelopePresent)
                             {
-                                float PanningEnvelopeValue = WalkEnvelope(xstate, Envelope, &PlaybackState->PanningEnvelope, 1.0/(xstate->OutputSampleRate), PlaybackState->bIsCrossFading);
+                                float PanningEnvelopeValue = WalkEnvelope
+                                    (xstate
+                                    ,Envelope
+                                    ,&PlaybackState->PanningEnvelope
+                                    ,1.0/(xstate->OutputSampleRate)
+                                    ,PlaybackState->bIsCrossFading
+                                    );
+
                                 ModulationPan = PanningGainFromZeroToOne(PanningEnvelopeValue);
                             }
                         }
@@ -6769,15 +7260,17 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                         {
                             unsigned int pbsample = round(PlaybackState->PlaybackPosition);
 
+                            float Vol = (CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f;
+
                             if (NumChannels == 2)
                             {
-                                Dry[0] += LeftPanGain * (XRNS_ACCESS_STEREO_SAMPLE(2 * pbsample + 0) * ((CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f));
-                                Dry[1] += RightPanGain * (XRNS_ACCESS_STEREO_SAMPLE(2 * pbsample + 1) * ((CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f));                    
+                                Dry[0] += LeftPanGain  * XRNS_ACCESS_STEREO_SAMPLE(2 * pbsample + 0) * Vol;
+                                Dry[1] += RightPanGain * XRNS_ACCESS_STEREO_SAMPLE(2 * pbsample + 1) * Vol;
                             }
                             else
                             {
-                                Dry[0] += LeftPanGain * (XRNS_ACCESS_MONO_SAMPLE(pbsample) * ((CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f));
-                                Dry[1] += RightPanGain * (XRNS_ACCESS_MONO_SAMPLE(pbsample) * ((CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f));
+                                Dry[0] += LeftPanGain  * XRNS_ACCESS_MONO_SAMPLE(pbsample) * Vol;
+                                Dry[1] += RightPanGain * XRNS_ACCESS_MONO_SAMPLE(pbsample) * Vol;
                             }
                         } 
                         else if (   Sample->InterpolationMode == XRNS_INTERPOLATION_LINEAR
@@ -6788,7 +7281,9 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                             float NextSampleL;
                             float NextSampleR;
 
-                            unsigned int OffsetIntoSample = Instrument->Samples[PlaybackState->CurrentSample].SampleStart;
+                            xrns_sample *CurrentSample = &Instrument->Samples[PlaybackState->CurrentSample];
+
+                            unsigned int OffsetIntoSample = CurrentSample->SampleStart;
 
                             float base_sample_floating;
                             unsigned int base_sample;
@@ -6870,15 +7365,17 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                                 }
                             }
 
+                            float Vol = (CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f;
+
                             if (NumChannels == 2)
                             {
-                                Dry[0] += LeftPanGain * ((BaseSampleL * (1.0f - alpha) + NextSampleL * alpha) * ((CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f));
-                                Dry[1] += RightPanGain * ((BaseSampleR * (1.0f - alpha) + NextSampleR * alpha) * ((CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f));                    
+                                Dry[0] += LeftPanGain  * (BaseSampleL * (1.0f - alpha) + NextSampleL * alpha) * Vol;
+                                Dry[1] += RightPanGain * (BaseSampleR * (1.0f - alpha) + NextSampleR * alpha) * Vol;
                             }
                             else
                             {
-                                float v = ((BaseSampleL * (1.0f - alpha) + NextSampleL * alpha) * ((CrossFadeLevel * ((float) Sampler->CurrentVolume.Val)) / 255.0f));
-                                Dry[0] += LeftPanGain * v;
+                                float v = (BaseSampleL * (1.0f - alpha) + NextSampleL * alpha) * Vol;
+                                Dry[0] += LeftPanGain  * v;
                                 Dry[1] += RightPanGain * v;
                             }
                         }
@@ -6914,13 +7411,23 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
 
                         if (Instrument->NumModulationSets && (Sample->ModulationSetIndex != -1))
                         {
-                            xrns_modulation_set *ModulationSet = &Instrument->ModulationSets[Sample->ModulationSetIndex];
+                            xrns_modulation_set *ModulationSet 
+                                = &Instrument->ModulationSets[Sample->ModulationSetIndex];
+
                             xrns_envelope *Envelope = &ModulationSet->Pitch;
 
                             if (Envelope && ModulationSet->bPitchEnvelopePresent)
                             {
+                                double NewEnv = WalkEnvelope
+                                    (xstate
+                                    ,Envelope
+                                    ,&PlaybackState->PitchEnvelope
+                                    ,1.0/(xstate->OutputSampleRate)
+                                    ,PlaybackState->bIsCrossFading
+                                    );
+
                                 PitchEnvelopeValue = ((double) ModulationSet->PitchModulationRange)
-                                                   * (2.0f * WalkEnvelope(xstate, Envelope, &PlaybackState->PitchEnvelope, 1.0/(xstate->OutputSampleRate), PlaybackState->bIsCrossFading) - 1.0f);
+                                                   * (2.0f * NewEnv - 1.0f);
                                 PitchAdjustment   += PitchEnvelopeValue;
                             }
                         }
@@ -6964,17 +7471,21 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                         if (Sample->BeatSyncIsActive)
                         {
                             /* Work out the re-pitch....  */
-                            double DurationOfBeatSyncLines = Sample->BeatSyncLines * xstate->CurrentLineDuration / xstate->OutputSampleRate;
+                            double DurationOfBeatSyncLines = Sample->BeatSyncLines * xstate->CurrentLineDuration 
+                                                           / xstate->OutputSampleRate;
+
                             KeyPitch = ((double) LengthSamples / (DurationOfBeatSyncLines * ((double)SampleRateHz)));
                         }
 
                         if (PitchAdjustment > 0 && PitchTableIdx < PITCHING_TABLE_LENGTH - 1)
                         {
-                            KeyPitch = (KeyPitch * (1.0 - PitchAdjustment)) + (PitchAdjustment) * PitchingTable[PitchTableIdx + 1];
+                            KeyPitch = (KeyPitch * (1.0 - PitchAdjustment)) 
+                                     + (PitchAdjustment) * PitchingTable[PitchTableIdx + 1];
                         }
                         else if (PitchAdjustment < 0 && PitchTableIdx > 0)
                         {
-                            KeyPitch = (KeyPitch * (1.0 + PitchAdjustment)) + (-PitchAdjustment) * PitchingTable[PitchTableIdx - 1];
+                            KeyPitch = (KeyPitch * (1.0 + PitchAdjustment)) 
+                                     + (-PitchAdjustment) * PitchingTable[PitchTableIdx - 1];
                         }                        
 
                         double dt = KeyPitch * ((double)SampleRateHz / xstate->OutputSampleRate);
@@ -6994,7 +7505,8 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
 
                         if (!bSampleIsPlayingLoopRelease && Sample->LoopMode != XRNS_LOOP_MODE_OFF)
                         {
-                            PlaybackState->PlaybackPosition = SampleLoopWrapping(Sample, PlaybackState, PlaybackState->PlaybackPosition);
+                            PlaybackState->PlaybackPosition 
+                                = SampleLoopWrapping(Sample, PlaybackState, PlaybackState->PlaybackPosition);
                         }
 
                         /* exiting the sample boundaries always ends the note, sample looping
@@ -7004,19 +7516,24 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
                         {
                             if (PlaybackState->PlaybackDirection == XRNS_FORWARD)
                             {
-                                if (PrevPos < PlaybackState->FrontPosition0 && PlaybackState->PlaybackPosition >= PlaybackState->FrontPosition0)
+                                if (   PrevPos < PlaybackState->FrontPosition0 
+                                    && PlaybackState->PlaybackPosition >= PlaybackState->FrontPosition0)
                                 {
                                     PlaybackState->bPlaying = 0;
                                     PlaybackState->Active = 0;
                                 }
-                            } else if (PlaybackState->PlaybackDirection == XRNS_BACKWARD)
+                            }
+                            else if (PlaybackState->PlaybackDirection == XRNS_BACKWARD)
                             {
-                                if (PrevPos > PlaybackState->BackPosition0 && PlaybackState->PlaybackPosition <= PlaybackState->BackPosition0)
+                                if (   PrevPos > PlaybackState->BackPosition0 
+                                    && PlaybackState->PlaybackPosition <= PlaybackState->BackPosition0)
                                 {
                                     PlaybackState->bPlaying = 0;
                                     PlaybackState->Active = 0;
                                 }
-                                if (PrevPos > PlaybackState->BackPosition1 && PlaybackState->PlaybackPosition <= PlaybackState->BackPosition1)
+
+                                if (   PrevPos > PlaybackState->BackPosition1 
+                                    && PlaybackState->PlaybackPosition <= PlaybackState->BackPosition1)
                                 {
                                     PlaybackState->bPlaying = 0;
                                     PlaybackState->Active = 0;
@@ -7162,11 +7679,14 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
 
         TracyCZoneN(time_ctx, "Time Walking", 1);
 
+        int          NumberOfLines           = xstate->xdoc->PatternPool[PatternIdx].NumberOfLines;
         unsigned int PatternIdx              = xstate->xdoc->PatternSequence[xstate->CurrentPatternIndex].PatternIdx;
-        int bOnLastRow                       = (xstate->CurrentRow == xstate->xdoc->PatternPool[PatternIdx].NumberOfLines - 1);
-        int bSampleIncrementWouldWrapPattern = ((xstate->XRNSGridOffset >= 0 && (xstate->CurrentSample >= xstate->LocationOfNextLine)) || (xstate->XRNSGridOffset <  0 && (xstate->CurrentSample >= xstate->LocationOfNextLine - 1.0)));
+        int bSampleIncrementWouldWrapLinePre = (xstate->CurrentSample >= xstate->LocationOfNextLine - 1.0);
+        int bOnLastRow                       = (xstate->CurrentRow == NumberOfLines - 1);
         int bSampleIncrementWouldWrapLine    = (xstate->CurrentSample >= xstate->LocationOfNextLine);
         int bSampleIncrementWouldWrapTick    = (xstate->CurrentSample >= xstate->LocationOfNextTick);
+        int bSampleIncrementWouldWrapPattern = (  (xstate->XRNSGridOffset >= 0 && bSampleIncrementWouldWrapLine) 
+                                               || (xstate->XRNSGridOffset < 0 && bSampleIncrementWouldWrapLinePre));
 
         if (bExitingBeforeLine && !bSampleIncrementWouldWrapLine)
         {
@@ -7246,7 +7766,9 @@ int run_engine(XRNSPlaybackState *xstate, int bExitingAfterTick, int bExitingAft
         {
             xstate->CurrentTick++;
             xrns_perform_tick_processing(xstate);
-            xstate->LocationOfNextTick = xstate->BaseOfCurrentlyPlayingLine + (xstate->CurrentTick + 1) * xstate->CurrentTickDuration;
+            xstate->LocationOfNextTick = xstate->BaseOfCurrentlyPlayingLine 
+                                       + (xstate->CurrentTick + 1) * xstate->CurrentTickDuration;
+
             if (bExitingAfterTick)
             {
                 bTimeToExit = 1;
@@ -7506,7 +8028,14 @@ XRNS_DLL_EXPORT int32_t xrns_produce_samples(XRNSPlaybackState *xstate, unsigned
  * XRNS_ERR_INVALID_TRACK_NAME
  * XRNS_ERR_INVALID_INPUT_PARAM
  */
-XRNS_DLL_EXPORT int32_t xrns_produce_samples_submix(XRNSPlaybackState *xstate, unsigned int num_samples, float *p_samples, char **pp_track_names, int num_track_names)
+XRNS_DLL_EXPORT int32_t
+xrns_produce_samples_submix
+    (XRNSPlaybackState *xstate
+    ,unsigned int num_samples
+    ,float *p_samples
+    ,char **pp_track_names
+    ,int num_track_names
+    )
 {
     int ch = 0;
 
@@ -7601,7 +8130,13 @@ XRNS_DLL_EXPORT int32_t xrns_done_producing_samples(XRNSPlaybackState *xstate, u
  * XRNS_ERR_NULL_STATE
  * XRNS_ERR_WRONG_INPUT_SIZE
  */
-XRNS_DLL_EXPORT int32_t xrns_provide_notes(XRNSPlaybackState *xstate, uint32_t num_notes, uint32_t num_bytes, void *p_notes)
+XRNS_DLL_EXPORT int32_t
+xrns_provide_notes
+    (XRNSPlaybackState *xstate
+    ,uint32_t num_notes
+    ,uint32_t num_bytes
+    ,void *p_notes
+    )
 {
     if (!xstate) return XRNS_ERR_NULL_STATE;
     if (num_notes == 0 || num_bytes == 0 || !p_notes) return XRNS_ERR_INVALID_INPUT_PARAM;
@@ -7653,6 +8188,8 @@ XRNS_DLL_EXPORT int32_t xrns_prepare_active_notes(XRNSPlaybackState *xstate)
                     int Transpose = Instrument->Samples[CurrentSample].Transpose;
                     int BaseNote  = Sampler->PlaybackStates[0].CurrentBaseNote;
 
+                    float SamplesPlayedFor = (float) Sampler->PlaybackStates[0].SamplesPlayedFor;
+
                     Info->Track             = track;
                     Info->Col               = col;
                     Info->NoteID            = Sampler->CurrentNote; 
@@ -7660,7 +8197,7 @@ XRNS_DLL_EXPORT int32_t xrns_prepare_active_notes(XRNSPlaybackState *xstate)
                     Info->InstrumentID      = Sampler->CurrentInstrument;
                     Info->SampleID          = Sampler->PlaybackStates[0].CurrentSample;
                     Info->PlaybackDirection = Sampler->PlaybackStates[0].PlaybackDirection;
-                    Info->SecondsPlayingFor = (float) Sampler->PlaybackStates[0].SamplesPlayedFor / xstate->OutputSampleRate;
+                    Info->SecondsPlayingFor = SamplesPlayedFor / xstate->OutputSampleRate;
                     Info->ActualNoteHz      = Sampler->SavedPitchMod;
                     NumOutgoingNotes++;
                 }
