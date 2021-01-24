@@ -1,38 +1,67 @@
-#include "xrns_player.h"
+/* 
+ * Standalone playback of Renoise (https://www.renoise.com) project files in realtime. 
+ * This software is in the public domain, please see the below comments.
+ * For more information, check the README file.
+ *
+ * Christopher Hines - http://topherhin.es
+ * @xtopherhin
+ * 
+ * GitHub: https://github.com/xtopher-xyz/xrns-player
+ *
+ * 24/01/2021
+ *
+ * This is free and unencumbered software released into the public domain.
+ * 
+ * Anyone is free to copy, modify, publish, use, compile, sell, or
+ * distribute this software, either in source code form or as a compiled
+ * binary, for any purpose, commercial or non-commercial, and by any
+ * means.
+ * 
+ * In jurisdictions that recognize copyright laws, the author or authors
+ * of this software dedicate any and all copyright interest in the
+ * software to the public domain. We make this dedication for the benefit
+ * of the public at large and to the detriment of our heirs and
+ * successors. We intend this dedication to be an overt act of
+ * relinquishment in perpetuity of all present and future rights to this
+ * software under copyright law.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ * 
+ * For more information, please refer to <http://unlicense.org/>
+ */
+
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
+#include "xrns_player.h"
+
+/* Hand-rolled effects.
+ */
 #include "effects/dsp.c"
 #include "effects/westverb.c"
 
-#include "stddef.h"
-
-#ifdef INLCUDE_FLATBUFFER_INTERFACE
-#include "XRNSSchema_builder.h"
-#include "flatcc/flatcc_builder.h"
-#endif
-
-#define MA_LOG_LEVEL MA_LOG_LEVEL_VERBOSE
-#define MA_DEBUG_OUTPUT
+/* Used for decoding FLAC instrument samples.
+ * https://miniaud.io/index.html
+ */
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio/miniaudio.h"
 
+/* Profiling hooks for the Tracy profiler- highly recommended.
+ * https://github.com/wolfpld/tracy
+ */
 #include "tracy/TracyC.h"
 
-#include "miniz/miniz.c"
-
-/* Return Codes!
+/* Convinient alternative to zlib, for uncompressing the XML contained within XRNS files.
+ * https://github.com/richgel999/miniz
  */
-#define XRNS_WOULD_WRAP_ROW           ( 1)
-#define XRNS_SUCCESS                  ( 0)
-#define XRNS_ERR_INVALID_INPUT_PARAM  (-1)
-#define XRNS_ERR_NULL_STATE           (-2)
-#define XRNS_ERR_WRONG_INPUT_SIZE     (-3)
-#define XRNS_ERR_OUT_OF_SAMPLES       (-4)
-#define XRNS_ERR_INVALID_TRACK_NAME   (-5) 
-#define XRNS_ERR_TRACK_NOT_FOUND      (-6) 
-#define XRNS_ERR_PARSING_FAIL         (-7) 
+#include "miniz/miniz.c"
 
 /* Renoise defines this to be 12. Basically this is the polyphony 
  * limit for a single note column within a track. Because notes
@@ -6273,7 +6302,7 @@ XRNS_DLL_EXPORT int xrns_set_output_sample_rate(XRNSPlaybackState *xstate, float
 
 void print_galloc_bytes_used(galloc_ctx *g);
 
-XRNS_DLL_EXPORT XRNSPlaybackState * xrns_create_playback_state_from_bytes(void *p_bytes, uint32_t num_bytes)
+XRNS_DLL_EXPORT XRNSPlaybackState * xrns_create_playback_state_from_bytes(void *p_bytes, unsigned int num_bytes)
 {
     TracyCZoneN(ctx, "Create Playback", 1);
 
@@ -7686,6 +7715,9 @@ XRNS_DLL_EXPORT void *xrns_pull_active_notes(XRNSPlaybackState *xstate)
 
 #ifdef INLCUDE_FLATBUFFER_INTERFACE
 
+#include "XRNSSchema_builder.h"
+#include "flatcc/flatcc_builder.h"
+
 XRNS_DLL_EXPORT int32_t xrns_copy_out_song_serialized(XRNSPlaybackState *xstate, char *p_bytes)
 {
     if (xstate->bSongHasBeenSerialized)
@@ -7866,7 +7898,7 @@ XRNS_DLL_EXPORT uint32_t xrns_prepare_song_serialized(XRNSPlaybackState *xstate)
 }
 #endif
 
-void xrns_produce_samples_int16(XRNSPlaybackState *xstate, unsigned int num_samples, int16_t *p_samples)
+void xrns_produce_samples_int16(XRNSPlaybackState *xstate, unsigned int num_samples, char *p_samples)
 {
     int i;
     float *dumb = malloc(num_samples * 2 * sizeof(float));
@@ -7889,7 +7921,7 @@ void xrns_produce_samples_int16(XRNSPlaybackState *xstate, unsigned int num_samp
 
     for (i = 0; i < num_samples * 2; i++)
     {
-        p_samples[i] = (int16_t) (32768 * dumb[i]);
+        ((int16_t*)p_samples)[i] = (int16_t) (32768 * dumb[i]);
     }
 
     free(dumb);
