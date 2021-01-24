@@ -366,9 +366,9 @@ typedef struct
     char    *attribute;
     char    *value;
     char     b_parsing_attribute;
-} xml;
+} xml_ctx;
 
-void xml_init(xml *g, char *xml)
+void xml_init(xml_ctx *g, char *xml)
 {
     int i;
     for (i = 0; i < sizeof(xml); i++)
@@ -377,7 +377,7 @@ void xml_init(xml *g, char *xml)
     g->xml = xml;
 }
 
-xml_res xml_parse_one_char(xml *g)
+xml_res xml_parse_one_char(xml_ctx *g)
 {
     char *xmlptr = g->xml;
 
@@ -591,6 +591,47 @@ typedef struct
 } zip_data_descriptor;
 #pragma pack(pop)
 
+uint32_t crc(unsigned char *p, unsigned long len)
+{
+    int i;
+    uint8_t k;
+    uint32_t u;
+    uint32_t crc_table[256];
+
+    /* x^32+x^26+x^23+x^22+x^16+x^12+x^11+x^10+x^8+x^7+x^5+x^4+x^2+x+1. */
+    int poly_bits[] = {0,1,2,4,5,7,8,10,11,12,16,22,23,26};
+    uint32_t poly = 0u;
+    for (i = 0; i < sizeof(poly_bits)/sizeof(poly_bits[0]); i++)
+        poly |= (1UL << (31 - poly_bits[i]));
+
+    for (u = 0; u < 256; u++)
+    {
+        uint32_t c = u;
+        for (k = 0; k < 8; k++)
+        {
+            if (c & 1)
+            {
+                c  = (c >> 1) ^ (poly);
+            }
+            else
+            {
+                c  = (c >> 1);
+            }
+            
+        }
+        crc_table[u] = c;
+    }
+
+    uint32_t r = 0xffffffffUL;
+    while (len)
+    {
+        r = ((r >> 8)) ^ crc_table[((r) ^ *p++) & 0xFF];
+        len--;
+    }
+
+    return r ^ 0xffffffffUL;
+}
+
 size_t zip_end_of_central_directory_record_size(uint8_t *p)
 {
     zip_end_of_central_directory_record *z = (zip_end_of_central_directory_record *) p;
@@ -623,7 +664,7 @@ uint8_t *gambit_unzip_single_file(uint8_t *p_deflate_stream, uint8_t *p_dest, mz
 {
     if (MZ_OK != mz_uncompress_skip_header(p_dest, uncompressed_size, p_deflate_stream, *compressed_size))
     {
-        printf("Can't uncompress this shit.\n");
+        return NULL;
     }
     return p_dest;
 }
@@ -633,7 +674,7 @@ uint8_t *gambit_unzip_single_file_allocate(uint8_t *p_deflate_stream, mz_ulong *
     void *p_out_mem = malloc(*uncompressed_size);
     if (MZ_OK != mz_uncompress_skip_header(p_out_mem, uncompressed_size, p_deflate_stream, *compressed_size))
     {
-        printf("Can't uncompress this shit.\n");
+        return NULL;
     }
     p_out_mem = realloc(p_out_mem, *uncompressed_size);
     return p_out_mem;
@@ -645,7 +686,7 @@ typedef struct
     char                  FileName[XRNS_MAX_NAME];
     char                 *p_mem;
     char                  b_filename_matched;
-} gambit_zip_entry;
+} xrns_zip_entry;
 
 typedef struct
 {
@@ -656,7 +697,7 @@ typedef struct
     int      total_num_files;
 } zip_file_write_context;
 
-void gambit_zip_start_writing(zip_file_write_context *ctx)
+void xrns_zip_start_writing(zip_file_write_context *ctx)
 {
     ctx->locals          = 0;
     ctx->locals_len      = 0;
@@ -683,7 +724,7 @@ void write_n_grow(uint8_t **p, size_t *sz, uint8_t *bytesToWrite, size_t numByte
     memcpy(*p + *sz - numBytes, bytesToWrite, numBytes);
 }
 
-void gambit_zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz, int b_compress, char *path)
+void xrns_zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz, int b_compress, char *path)
 {
     zip_local_file_header        localheader;
     zip_central_directory_header centralheader;
@@ -749,7 +790,7 @@ void gambit_zip_write_file(zip_file_write_context *ctx, uint8_t *mem, size_t sz,
     write_n_grow(&ctx->centrals, &ctx->centrals_len, (uint8_t *) path,           strlen(path));
 }
 
-void gambit_zip_finish_writing_and_save(zip_file_write_context *ctx, char *p_filename)
+void xrns_zip_finish_writing_and_save(zip_file_write_context *ctx, char *p_filename)
 {
     uint8_t *mem = 0;
     size_t   len = 0;
@@ -779,9 +820,9 @@ typedef struct
     uint8_t *base_zip;
     uint8_t *pzip;
     size_t   zip_sz;
-} gambit_zip_parsing_state;
+} xrns_zip_parsing_state;
 
-void gambit_start_parsing(gambit_zip_parsing_state *zs, uint8_t *p_zip, size_t zip_sz)
+void gambit_start_parsing(xrns_zip_parsing_state *zs, uint8_t *p_zip, size_t zip_sz)
 {
     zs->base_zip = p_zip;
     zs->pzip     = p_zip;
@@ -1428,53 +1469,6 @@ int xmlcopy(char *a, char *b)
     return 1;
 }
 
-#ifndef GAMBIT_CRC
-#define GAMBIT_CRC
-
-uint32_t crc_table[256];
-
-uint32_t crc(unsigned char *p, unsigned long len)
-{
-    int i;
-    uint8_t k;
-    uint32_t u;
-    /* compute the table, dump this to an array in the future */
-    /* x^32+x^26+x^23+x^22+x^16+x^12+x^11+x^10+x^8+x^7+x^5+x^4+x^2+x+1. */
-    int poly_bits[] = {0,1,2,4,5,7,8,10,11,12,16,22,23,26};
-    uint32_t poly = 0u;
-    for (i = 0; i < sizeof(poly_bits)/sizeof(poly_bits[0]); i++)
-        poly |= (1UL << (31 - poly_bits[i]));
-
-    for (u = 0; u < 256; u++)
-    {
-        uint32_t c = u;
-        for (k = 0; k < 8; k++)
-        {
-            if (c & 1)
-            {
-                c  = (c >> 1) ^ (poly);
-            }
-            else
-            {
-                c  = (c >> 1);
-            }
-            
-        }
-        crc_table[u] = c;
-    }
-
-    uint32_t r = 0xffffffffUL;
-    while (len)
-    {
-        r = ((r >> 8)) ^ crc_table[((r) ^ *p++) & 0xFF];
-        len--;
-    }
-
-    return r ^ 0xffffffffUL;
-}
-
-#endif
-
 #pragma pack(push, 1)
 typedef struct
 {
@@ -1728,9 +1722,9 @@ typedef struct
  * Caller should free the p_mem pointer when finished.
  * p_mem is 0 if anything went wrong.
  */
-gambit_zip_entry gambit_parse_next_file(gambit_zip_parsing_state *zs, char *only_unpack_this_filename)
+xrns_zip_entry gambit_parse_next_file(xrns_zip_parsing_state *zs, char *only_unpack_this_filename)
 {
-    gambit_zip_entry z;
+    xrns_zip_entry z;
     z.p_mem = 0;
     z.b_filename_matched = 0;
 
@@ -1840,10 +1834,10 @@ gambit_zip_entry gambit_parse_next_file(gambit_zip_parsing_state *zs, char *only
     return z;
 }
 
-gambit_zip_entry gambit_fetch_zipped_file_by_name(void *p_mem, size_t zip_sz, char *p_filename)
+xrns_zip_entry gambit_fetch_zipped_file_by_name(void *p_mem, size_t zip_sz, char *p_filename)
 {
-    gambit_zip_entry z; z.p_mem = 0;
-    gambit_zip_parsing_state zs;
+    xrns_zip_entry z; z.p_mem = 0;
+    xrns_zip_parsing_state zs;
     gambit_start_parsing(&zs, p_mem, zip_sz);
     char c[2048];
     int i;
@@ -1953,7 +1947,7 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
 {
     TracyCZoneN(ctx, "XRNS Get Counts", 1);
 
-    xml x;
+    xml_ctx x;
     xml_init(&x, xml);
 
     GZEROED(xrns_tag_set, t);
@@ -2098,7 +2092,7 @@ xrns_envelope *GetModulationPointer(xrns_modulation_set *ModulationSet, int Modu
     return 0;
 }
 
-void ParseEnvelope(xrns_envelope *Envelope, xml *x, galloc_ctx *g)
+void ParseEnvelope(xrns_envelope *Envelope, xml_ctx *x, galloc_ctx *g)
 {
     if (!Envelope) return;
 
@@ -2238,7 +2232,7 @@ void ParseInstruments
     ,xrns_document *xdoc
     ,int            PatternIdx
     ,int            TrackIdx
-    ,xml    *x
+    ,xml_ctx    *x
     ,xrns_tag_set  *t
     )
 {
@@ -2505,7 +2499,7 @@ void ParseLines
     ,xrns_document *xdoc
     ,int            PatternIdx
     ,int            TrackIdx
-    ,xml    *x
+    ,xml_ctx    *x
     ,xrns_tag_set  *t
     )
 {
@@ -2674,7 +2668,7 @@ void ParseLines
 void ParseTracks
     (galloc_ctx    *g
     ,xrns_document *xdoc
-    ,xml    *x
+    ,xml_ctx    *x
     ,xrns_tag_set  *t
     )
 {
@@ -2920,7 +2914,7 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
         }
     }
 
-    xml x;
+    xml_ctx x;
     xml_init(&x, xml);
 
     GZEROED(xrns_tag_set, t);
@@ -3029,7 +3023,7 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
             }
             else if (t.Tracks && !t.Patterns && (t.SequencerGroupTrack || t.SequencerTrack || t.SequencerMasterTrack))
             {
-                // DERP!
+
             }
             else if (t.PatternSequence && t.SequenceEntries && t.SequenceEntry)
             {
@@ -3196,7 +3190,7 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
 
 typedef struct
 {
-    gambit_zip_entry z;
+    xrns_zip_entry   z;
     char             zipped_filename[2048];
     xrns_document   *xdoc;
 } populate_instrument_desc;
@@ -3205,7 +3199,7 @@ xrns_sample *populateInstrumentSample(populate_instrument_desc *InstrumentDesc)
 {
     TracyCZoneN(ctx, "Populate Instrument Sample", 1);
 
-    gambit_zip_entry *z                = &InstrumentDesc->z;
+    xrns_zip_entry *z                  = &InstrumentDesc->z;
     char             *zipped_filename  = InstrumentDesc->zipped_filename;
     xrns_document    *xdoc             = InstrumentDesc->xdoc;
 
@@ -3281,14 +3275,14 @@ int populateXRNSDocument(galloc_ctx *g, void *mem, size_t mem_sz, xrns_document 
 
     work_table *Decoding = CreateWorkTable(0);
 
-    gambit_zip_parsing_state zs;
+    xrns_zip_parsing_state zs;
     gambit_start_parsing(&zs, mem, mem_sz);
 
     xrns_xml_parse_desc ParseDesc;
 
     do
     {
-        gambit_zip_entry z = gambit_parse_next_file(&zs, 0);
+        xrns_zip_entry z = gambit_parse_next_file(&zs, 0);
         if (!z.p_mem) break;
         for (i = 0; i < z.Header.FileNameLength; i++) c[i] = z.FileName[i];
         c[i] = 0;
