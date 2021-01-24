@@ -1095,41 +1095,6 @@ zip_entry zip_parse_next_file(zip_parsing_state *zs, char *only_unpack_this_file
     return z;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static void *xrns_read_entire_file(char *p_filename, long *p_file_size)
 {
     TracyCZoneN(ctx, "Read Entire File", 1);
@@ -1170,342 +1135,10 @@ static void *xrns_read_entire_file(char *p_filename, long *p_file_size)
     return file_mem;
 }
 
-#define PITCHING_TABLE_LENGTH (193)
-static const double PitchingTable[PITCHING_TABLE_LENGTH] = 
-{
-    0.00390625,
-    0.00413852771234,
-    0.00438461737621,
-    0.00464534029298,
-    0.00492156660115,
-    0.00521421818035,
-    0.00552427172802,
-    0.00585276201905,
-    0.00620078535925,
-    0.00656950324417,
-    0.00696014623547,
-    0.00737401806783,
-    0.0078125,
-    0.00827705542468,
-    0.00876923475242,
-    0.00929068058596,
-    0.0098431332023,
-    0.0104284363607,
-    0.011048543456,
-    0.0117055240381,
-    0.0124015707185,
-    0.0131390064883,
-    0.0139202924709,
-    0.0147480361357,
-    0.015625,
-    0.0165541108494,
-    0.0175384695048,
-    0.0185813611719,
-    0.0196862664046,
-    0.0208568727214,
-    0.0220970869121,
-    0.0234110480762,
-    0.024803141437,
-    0.0262780129767,
-    0.0278405849419,
-    0.0294960722713,
-    0.03125,
-    0.0331082216987,
-    0.0350769390097,
-    0.0371627223438,
-    0.0393725328092,
-    0.0417137454428,
-    0.0441941738242,
-    0.0468220961524,
-    0.049606282874,
-    0.0525560259534,
-    0.0556811698838,
-    0.0589921445426,
-    0.0625,
-    0.0662164433975,
-    0.0701538780193,
-    0.0743254446877,
-    0.0787450656184,
-    0.0834274908856,
-    0.0883883476483,
-    0.0936441923048,
-    0.099212565748,
-    0.105112051907,
-    0.111362339768,
-    0.117984289085,
-    0.125,
-    0.132432886795,
-    0.140307756039,
-    0.148650889375,
-    0.157490131237,
-    0.166854981771,
-    0.176776695297,
-    0.18728838461,
-    0.198425131496,
-    0.210224103813,
-    0.222724679535,
-    0.23596857817,
-    0.25,
-    0.26486577359,
-    0.280615512077,
-    0.297301778751,
-    0.314980262474,
-    0.333709963543,
-    0.353553390593,
-    0.374576769219,
-    0.396850262992,
-    0.420448207627,
-    0.44544935907,
-    0.471937156341,
-    0.5,
-    0.52973154718,
-    0.561231024155,
-    0.594603557501,
-    0.629960524947,
-    0.667419927085,
-    0.707106781187,
-    0.749153538438,
-    0.793700525984,
-    0.840896415254,
-    0.89089871814,
-    0.943874312682,
-    1.0,
-    1.05946309436,
-    1.12246204831,
-    1.189207115,
-    1.25992104989,
-    1.33483985417,
-    1.41421356237,
-    1.49830707688,
-    1.58740105197,
-    1.68179283051,
-    1.78179743628,
-    1.88774862536,
-    2.0,
-    2.11892618872,
-    2.24492409662,
-    2.37841423001,
-    2.51984209979,
-    2.66967970834,
-    2.82842712475,
-    2.99661415375,
-    3.17480210394,
-    3.36358566101,
-    3.56359487256,
-    3.77549725073,
-    4.0,
-    4.23785237744,
-    4.48984819324,
-    4.75682846001,
-    5.03968419958,
-    5.33935941668,
-    5.65685424949,
-    5.99322830751,
-    6.34960420787,
-    6.72717132203,
-    7.12718974512,
-    7.55099450145,
-    8.0,
-    8.47570475487,
-    8.97969638647,
-    9.51365692002,
-    10.0793683992,
-    10.6787188334,
-    11.313708499,
-    11.986456615,
-    12.6992084157,
-    13.4543426441,
-    14.2543794902,
-    15.1019890029,
-    16.0,
-    16.9514095097,
-    17.9593927729,
-    19.02731384,
-    20.1587367983,
-    21.3574376667,
-    22.627416998,
-    23.97291323,
-    25.3984168315,
-    26.9086852881,
-    28.5087589805,
-    30.2039780058,
-    32.0,
-    33.9028190195,
-    35.9187855459,
-    38.0546276801,
-    40.3174735966,
-    42.7148753334,
-    45.2548339959,
-    47.9458264601,
-    50.796833663,
-    53.8173705762,
-    57.017517961,
-    60.4079560116,
-    64.0,
-    67.805638039,
-    71.8375710918,
-    76.1092553602,
-    80.6349471933,
-    85.4297506669,
-    90.5096679919,
-    95.8916529201,
-    101.593667326,
-    107.634741152,
-    114.035035922,
-    120.815912023,
-    128.0,
-    135.611276078,
-    143.675142184,
-    152.21851072,
-    161.269894387,
-    170.859501334,
-    181.019335984,
-    191.78330584,
-    203.187334652,
-    215.269482305,
-    228.070071844,
-    241.631824047,
-    256.0
-};
-
-static const float PianoPitches[120] = 
-{
-    25.9565f,
-    27.5000f,
-    29.1352f,
-    30.8677f,
-    32.7032f,
-    34.6478f,
-    36.7081f,
-    38.8909f,
-    41.2034f,
-    43.6535f,
-    46.2493f,
-    48.9994f,
-    51.9131f,
-    55.0000f,
-    58.2705f,
-    61.7354f,
-    65.4064f,
-    69.2957f,
-    73.4162f,
-    77.7817f,
-    82.4069f,
-    87.3071f,
-    92.4986f,
-    97.9989f,
-    103.8262f,
-    110.0000f,
-    116.5409f,
-    123.4708f,
-    130.8128f,
-    138.5913f,
-    146.8324f,
-    155.5635f,
-    164.8138f,
-    174.6141f,
-    184.9972f,
-    195.9977f,
-    207.6523f,
-    220.0000f,
-    233.0819f,
-    246.9417f,
-    261.6256f,
-    277.1826f,
-    293.6648f,
-    311.1270f,
-    329.6276f,
-    349.2282f,
-    369.9944f,
-    391.9954f,
-    415.3047f,
-    440.0000f,
-    466.1638f,
-    493.8833f,
-    523.2511f,
-    554.3653f,
-    587.3295f,
-    622.2540f,
-    659.2551f,
-    698.4565f,
-    739.9888f,
-    783.9909f,
-    830.6094f,
-    880.0000f,
-    932.3275f,
-    987.7666f,
-    1046.5023f,
-    1108.7305f,
-    1174.6591f,
-    1244.5079f,
-    1318.5102f,
-    1396.9129f,
-    1479.9777f,
-    1567.9817f,
-    1661.2188f,
-    1760.0000f,
-    1864.6550f,
-    1975.5332f,
-    2093.0045f,
-    2217.4610f,
-    2349.3181f,
-    2489.0159f,
-    2637.0205f,
-    2793.8259f,
-    2959.9554f,
-    3135.9635f,
-    3322.4376f,
-    3520.0000f,
-    3729.3101f,
-    3951.0664f,
-    4186.0090f,
-    4434.9221f,
-    4698.6363f,
-    4978.0317f,
-    5274.0409f,
-    5587.6517f,
-    5919.9108f,
-    6271.9270f,
-    6644.8752f,
-    7040.0000f,
-    7458.6202f,
-    7902.1328f,
-    8372.0181f,
-    8869.8442f,
-    9397.2726f,
-    9956.0635f,
-    10548.0818f,
-    11175.3034f,
-    11839.8215f,
-    12543.8540f,
-    13289.7503f,
-    14080.0000f,
-    14917.2404f,
-    15804.2656f,
-    16744.0362f,
-    17739.6884f,
-    18794.5451f,
-    19912.1270f,
-    21096.1636f,
-    22350.6068f,
-    23679.6431f,
-    25087.7079f
-};
-
-unsigned int NoteToHzAssumingA440(int note_id)
-{
-    if (note_id > 0 && note_id < 120)
-    {
-        return PianoPitches[note_id];
-    }
-
-    return 0;
-}
-
 /* ====================================================================================================================
  * ====================================================================================================================
  * ====================================================================================================================
- * Structures
+ * XRNS Document Structures
  * ====================================================================================================================
  */
 
@@ -1789,6 +1422,21 @@ typedef struct
     int              bActive;
 } pooled_threads_ctx;
 
+typedef struct
+{
+    galloc_ctx    *g;
+    char          *xml;
+    size_t         xml_length;
+    xrns_document *xdoc;
+} xrns_xml_parse_desc;
+
+typedef struct
+{
+    zip_entry      z;
+    char           zipped_filename[2048];
+    xrns_document *xdoc;
+} populate_instrument_desc;
+
 work_table *CreateWorkTable(int NumJobs)
 {
     work_table *WorkTable = malloc(sizeof(work_table));
@@ -1991,7 +1639,6 @@ int EffectTypeIdxFromEffectType(char *c)
     }
 }
 
-
 void ParsePointFromTriple(xrns_point *Point, char *XML)
 {   
     Point->Pos = atoi(XML);
@@ -2013,6 +1660,15 @@ void InitNote(xrns_note *Note)
     Note->Delay         = XRNS_MISSING_VALUE;
     Note->EffectTypeIdx = XRNS_MISSING_VALUE;
     Note->EffectValue   = XRNS_MISSING_VALUE;
+}
+
+int ParseBoolStringFromXML(char *boolstr)
+{
+    if (MatchCharsToString(boolstr, "true"))
+    {
+        return 1;
+    }
+    else return 0;
 }
 
 unsigned char XRNSOctavelessNoteValue(unsigned char Note, unsigned char Sharp)
@@ -2350,15 +2006,6 @@ void XRNSGetCounts(char *xml, size_t xml_length, xrns_file_counts *Counts)
     while (r.event_type != XML_EVENT_EOF);
 
     TracyCZoneEnd(ctx);
-}
-
-int ParseBoolStringFromXML(char *boolstr)
-{
-    if (MatchCharsToString(boolstr, "true"))
-    {
-        return 1;
-    }
-    else return 0;
 }
 
 xrns_envelope *GetModulationPointer(xrns_modulation_set *ModulationSet, int ModulationTarget)
@@ -3150,14 +2797,6 @@ void ParseTracks
     TracyCZoneEnd(ctx);
 }
 
-typedef struct
-{
-    galloc_ctx    *g;
-    char          *xml;
-    size_t         xml_length;
-    xrns_document *xdoc;
-} xrns_xml_parse_desc;
-
 int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
 {
     int i, k;
@@ -3506,13 +3145,6 @@ int populateInstrumentsAndNotes(xrns_xml_parse_desc *ParseDesc)
 
 }
 
-typedef struct
-{
-    zip_entry      z;
-    char           zipped_filename[2048];
-    xrns_document *xdoc;
-} populate_instrument_desc;
-
 xrns_sample *populateInstrumentSample(populate_instrument_desc *InstrumentDesc)
 {
     TracyCZoneN(ctx, "Populate Instrument Sample", 1);
@@ -3569,7 +3201,7 @@ xrns_sample *populateInstrumentSample(populate_instrument_desc *InstrumentDesc)
         ,ma_dither_mode_none
         );
 
-    xrns_sample *Sample = malloc(sizeof(xrns_sample));//&xdoc->Instruments[InstrumentNumber].Samples[SampleNumber];
+    xrns_sample *Sample = malloc(sizeof(xrns_sample));
     memset(Sample, 0, sizeof(xrns_sample));
 
     Sample->PCM           = PCM;
@@ -3633,8 +3265,6 @@ int populateXRNSDocument(galloc_ctx *g, void *mem, size_t mem_sz, xrns_document 
             AddToWorkTable(Decoding, Job);
         }
 
-        // free(z.p_mem);
-
     } while (1);
 
     TracyCZoneEnd(main_ctx);
@@ -3672,6 +3302,328 @@ int populateXRNSDocument(galloc_ctx *g, void *mem, size_t mem_sz, xrns_document 
  * ====================================================================================================================
  */
 
+#define PITCHING_TABLE_LENGTH (193)
+static const double PitchingTable[PITCHING_TABLE_LENGTH] = 
+{
+    0.00390625,
+    0.00413852771234,
+    0.00438461737621,
+    0.00464534029298,
+    0.00492156660115,
+    0.00521421818035,
+    0.00552427172802,
+    0.00585276201905,
+    0.00620078535925,
+    0.00656950324417,
+    0.00696014623547,
+    0.00737401806783,
+    0.0078125,
+    0.00827705542468,
+    0.00876923475242,
+    0.00929068058596,
+    0.0098431332023,
+    0.0104284363607,
+    0.011048543456,
+    0.0117055240381,
+    0.0124015707185,
+    0.0131390064883,
+    0.0139202924709,
+    0.0147480361357,
+    0.015625,
+    0.0165541108494,
+    0.0175384695048,
+    0.0185813611719,
+    0.0196862664046,
+    0.0208568727214,
+    0.0220970869121,
+    0.0234110480762,
+    0.024803141437,
+    0.0262780129767,
+    0.0278405849419,
+    0.0294960722713,
+    0.03125,
+    0.0331082216987,
+    0.0350769390097,
+    0.0371627223438,
+    0.0393725328092,
+    0.0417137454428,
+    0.0441941738242,
+    0.0468220961524,
+    0.049606282874,
+    0.0525560259534,
+    0.0556811698838,
+    0.0589921445426,
+    0.0625,
+    0.0662164433975,
+    0.0701538780193,
+    0.0743254446877,
+    0.0787450656184,
+    0.0834274908856,
+    0.0883883476483,
+    0.0936441923048,
+    0.099212565748,
+    0.105112051907,
+    0.111362339768,
+    0.117984289085,
+    0.125,
+    0.132432886795,
+    0.140307756039,
+    0.148650889375,
+    0.157490131237,
+    0.166854981771,
+    0.176776695297,
+    0.18728838461,
+    0.198425131496,
+    0.210224103813,
+    0.222724679535,
+    0.23596857817,
+    0.25,
+    0.26486577359,
+    0.280615512077,
+    0.297301778751,
+    0.314980262474,
+    0.333709963543,
+    0.353553390593,
+    0.374576769219,
+    0.396850262992,
+    0.420448207627,
+    0.44544935907,
+    0.471937156341,
+    0.5,
+    0.52973154718,
+    0.561231024155,
+    0.594603557501,
+    0.629960524947,
+    0.667419927085,
+    0.707106781187,
+    0.749153538438,
+    0.793700525984,
+    0.840896415254,
+    0.89089871814,
+    0.943874312682,
+    1.0,
+    1.05946309436,
+    1.12246204831,
+    1.189207115,
+    1.25992104989,
+    1.33483985417,
+    1.41421356237,
+    1.49830707688,
+    1.58740105197,
+    1.68179283051,
+    1.78179743628,
+    1.88774862536,
+    2.0,
+    2.11892618872,
+    2.24492409662,
+    2.37841423001,
+    2.51984209979,
+    2.66967970834,
+    2.82842712475,
+    2.99661415375,
+    3.17480210394,
+    3.36358566101,
+    3.56359487256,
+    3.77549725073,
+    4.0,
+    4.23785237744,
+    4.48984819324,
+    4.75682846001,
+    5.03968419958,
+    5.33935941668,
+    5.65685424949,
+    5.99322830751,
+    6.34960420787,
+    6.72717132203,
+    7.12718974512,
+    7.55099450145,
+    8.0,
+    8.47570475487,
+    8.97969638647,
+    9.51365692002,
+    10.0793683992,
+    10.6787188334,
+    11.313708499,
+    11.986456615,
+    12.6992084157,
+    13.4543426441,
+    14.2543794902,
+    15.1019890029,
+    16.0,
+    16.9514095097,
+    17.9593927729,
+    19.02731384,
+    20.1587367983,
+    21.3574376667,
+    22.627416998,
+    23.97291323,
+    25.3984168315,
+    26.9086852881,
+    28.5087589805,
+    30.2039780058,
+    32.0,
+    33.9028190195,
+    35.9187855459,
+    38.0546276801,
+    40.3174735966,
+    42.7148753334,
+    45.2548339959,
+    47.9458264601,
+    50.796833663,
+    53.8173705762,
+    57.017517961,
+    60.4079560116,
+    64.0,
+    67.805638039,
+    71.8375710918,
+    76.1092553602,
+    80.6349471933,
+    85.4297506669,
+    90.5096679919,
+    95.8916529201,
+    101.593667326,
+    107.634741152,
+    114.035035922,
+    120.815912023,
+    128.0,
+    135.611276078,
+    143.675142184,
+    152.21851072,
+    161.269894387,
+    170.859501334,
+    181.019335984,
+    191.78330584,
+    203.187334652,
+    215.269482305,
+    228.070071844,
+    241.631824047,
+    256.0
+};
+
+static const float PianoPitches[120] = 
+{
+    25.9565f,
+    27.5000f,
+    29.1352f,
+    30.8677f,
+    32.7032f,
+    34.6478f,
+    36.7081f,
+    38.8909f,
+    41.2034f,
+    43.6535f,
+    46.2493f,
+    48.9994f,
+    51.9131f,
+    55.0000f,
+    58.2705f,
+    61.7354f,
+    65.4064f,
+    69.2957f,
+    73.4162f,
+    77.7817f,
+    82.4069f,
+    87.3071f,
+    92.4986f,
+    97.9989f,
+    103.8262f,
+    110.0000f,
+    116.5409f,
+    123.4708f,
+    130.8128f,
+    138.5913f,
+    146.8324f,
+    155.5635f,
+    164.8138f,
+    174.6141f,
+    184.9972f,
+    195.9977f,
+    207.6523f,
+    220.0000f,
+    233.0819f,
+    246.9417f,
+    261.6256f,
+    277.1826f,
+    293.6648f,
+    311.1270f,
+    329.6276f,
+    349.2282f,
+    369.9944f,
+    391.9954f,
+    415.3047f,
+    440.0000f,
+    466.1638f,
+    493.8833f,
+    523.2511f,
+    554.3653f,
+    587.3295f,
+    622.2540f,
+    659.2551f,
+    698.4565f,
+    739.9888f,
+    783.9909f,
+    830.6094f,
+    880.0000f,
+    932.3275f,
+    987.7666f,
+    1046.5023f,
+    1108.7305f,
+    1174.6591f,
+    1244.5079f,
+    1318.5102f,
+    1396.9129f,
+    1479.9777f,
+    1567.9817f,
+    1661.2188f,
+    1760.0000f,
+    1864.6550f,
+    1975.5332f,
+    2093.0045f,
+    2217.4610f,
+    2349.3181f,
+    2489.0159f,
+    2637.0205f,
+    2793.8259f,
+    2959.9554f,
+    3135.9635f,
+    3322.4376f,
+    3520.0000f,
+    3729.3101f,
+    3951.0664f,
+    4186.0090f,
+    4434.9221f,
+    4698.6363f,
+    4978.0317f,
+    5274.0409f,
+    5587.6517f,
+    5919.9108f,
+    6271.9270f,
+    6644.8752f,
+    7040.0000f,
+    7458.6202f,
+    7902.1328f,
+    8372.0181f,
+    8869.8442f,
+    9397.2726f,
+    9956.0635f,
+    10548.0818f,
+    11175.3034f,
+    11839.8215f,
+    12543.8540f,
+    13289.7503f,
+    14080.0000f,
+    14917.2404f,
+    15804.2656f,
+    16744.0362f,
+    17739.6884f,
+    18794.5451f,
+    19912.1270f,
+    21096.1636f,
+    22350.6068f,
+    23679.6431f,
+    25087.7079f
+};
+
 // @Optimization: Remove this conditional.
 #define XRNS_ACCESS_STEREO_SAMPLE(x) ((x >= 0 && x < MaxLengthSamples*2) ? pcm[x] : 0)
 #define XRNS_ACCESS_MONO_SAMPLE(x) ((x >= 0 && x < MaxLengthSamples) ? pcm[x] : 0)
@@ -3688,74 +3640,6 @@ typedef struct
     float Target;
     float alpha;
 } LerpFloat;
-
-void ResetLerp(LerpFloat *L, float Val, float alpha)
-{
-    L->Val    = Val;
-    L->Target = Val;
-    L->alpha  = alpha;
-}
-
-void RunLerp(LerpFloat *L)
-{
-    if (fabsf(L->Val - L->Target) < 1.0e-6)
-    {
-        L->Val = L->Target;
-    }
-
-    L->Val = L->Val * L->alpha + L->Target * (1.0f - L->alpha);
-}
-
-/* Panning law for the panning column is log: 3.0 + 10.0 * log10(xx/128)
- * where xx goes from 0 to 128 (all Left to all Right).
- *
- * Special case for xx == 64, dead center, we force the gains to be 1.0 and 1.0.
- * 
- */
-xrns_panning_gains PanningGainFromZeroToOne(float step)
-{
-    xrns_panning_gains g;
-    if (step < 1e-6f)
-    {
-        g.Left  = 1.4125f;
-        g.Right = 0.0f;
-        return g;
-    }
-    else if (fabsf(step - 0.5f) < 1e-6f)
-    {
-        g.Left  = 1.0f;
-        g.Right = 1.0f;
-        return g;
-    }
-    else if (fabsf(step - 1.0f) < 1e-6f)
-    {
-        g.Left  = 0.0f;
-        g.Right = 1.4125f;
-        return g;
-    }
-    else
-    {
-        g.Left  = 3.0f + 10.0f * log10f(1.0f - step);
-        g.Right = 3.0f + 10.0f * log10f(step);
-        g.Left  = powf(10.0f, g.Left/20.0f);
-        g.Right = powf(10.0f, g.Right/20.0f);
-        return g;
-    }
-}
-
-/* 0x00 = Left 
- * 0x40 = Center
- * 0x80 = Right
- */
-xrns_panning_gains PanningGainFromColNumber(float step)
-{
-    return PanningGainFromZeroToOne(step/128.0f);
-}
-
-xrns_panning_gains PanningGainFromNeg1To1(float step)
-{
-    return PanningGainFromZeroToOne((step + 1.0f)/2.0f);
-}
 
 typedef struct
 {
@@ -3920,26 +3804,6 @@ typedef struct
     xrns_sampler Samplers[XRNS_MAX_SAMPLERS_PER_COLUMN];
 } xrns_sampler_bank;
 
-void InitialiseSampler(xrns_sampler *Sampler)
-{
-    memset(Sampler, 0, sizeof(xrns_sampler));
-    Sampler->CxVolume            = 0xF;
-    Sampler->CxOffset            = -1;
-    Sampler->bCxKill             =  0;
-    Sampler->BxxValue            = -1;
-    Sampler->SxxValue            = -1;
-    for (int j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
-    {
-        xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
-        PlaybackState->CurrentSample = -1;
-        PlaybackState->bMapped = 0;
-        PlaybackState->BackPosition0  = 0.0f;
-        PlaybackState->BackPosition1  = 0.0f;
-    }
-    ResetLerp(&Sampler->CurrentPanning, 0x40,  0.96f);
-    ResetLerp(&Sampler->CurrentVolume,  0x100, 0.96f);
-}
-
 typedef struct 
 {
     LerpFloat        CurrentPreVolume;
@@ -4052,6 +3916,104 @@ struct _XRNSPlaybackState
 
     int bStopAtEndOfSong;
 };
+
+unsigned int NoteToHzAssumingA440(int note_id)
+{
+    if (note_id > 0 && note_id < 120)
+    {
+        return PianoPitches[note_id];
+    }
+
+    return 0;
+}
+
+void ResetLerp(LerpFloat *L, float Val, float alpha)
+{
+    L->Val    = Val;
+    L->Target = Val;
+    L->alpha  = alpha;
+}
+
+void RunLerp(LerpFloat *L)
+{
+    if (fabsf(L->Val - L->Target) < 1.0e-6)
+    {
+        L->Val = L->Target;
+    }
+
+    L->Val = L->Val * L->alpha + L->Target * (1.0f - L->alpha);
+}
+
+/* Panning law for the panning column is log: 3.0 + 10.0 * log10(xx/128)
+ * where xx goes from 0 to 128 (all Left to all Right).
+ *
+ * Special case for xx == 64, dead center, we force the gains to be 1.0 and 1.0.
+ * 
+ */
+xrns_panning_gains PanningGainFromZeroToOne(float step)
+{
+    xrns_panning_gains g;
+    if (step < 1e-6f)
+    {
+        g.Left  = 1.4125f;
+        g.Right = 0.0f;
+        return g;
+    }
+    else if (fabsf(step - 0.5f) < 1e-6f)
+    {
+        g.Left  = 1.0f;
+        g.Right = 1.0f;
+        return g;
+    }
+    else if (fabsf(step - 1.0f) < 1e-6f)
+    {
+        g.Left  = 0.0f;
+        g.Right = 1.4125f;
+        return g;
+    }
+    else
+    {
+        g.Left  = 3.0f + 10.0f * log10f(1.0f - step);
+        g.Right = 3.0f + 10.0f * log10f(step);
+        g.Left  = powf(10.0f, g.Left/20.0f);
+        g.Right = powf(10.0f, g.Right/20.0f);
+        return g;
+    }
+}
+
+/* 0x00 = Left 
+ * 0x40 = Center
+ * 0x80 = Right
+ */
+xrns_panning_gains PanningGainFromColNumber(float step)
+{
+    return PanningGainFromZeroToOne(step/128.0f);
+}
+
+xrns_panning_gains PanningGainFromNeg1To1(float step)
+{
+    return PanningGainFromZeroToOne((step + 1.0f)/2.0f);
+}
+
+void InitialiseSampler(xrns_sampler *Sampler)
+{
+    memset(Sampler, 0, sizeof(xrns_sampler));
+    Sampler->CxVolume            = 0xF;
+    Sampler->CxOffset            = -1;
+    Sampler->bCxKill             =  0;
+    Sampler->BxxValue            = -1;
+    Sampler->SxxValue            = -1;
+    for (int j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+    {
+        xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
+        PlaybackState->CurrentSample  = -1;
+        PlaybackState->bMapped        = 0;
+        PlaybackState->BackPosition0  = 0.0f;
+        PlaybackState->BackPosition1  = 0.0f;
+    }
+    ResetLerp(&Sampler->CurrentPanning, 0x40,  0.96f);
+    ResetLerp(&Sampler->CurrentVolume,  0x100, 0.96f);
+}
 
 static double PresentLineDuration(XRNSPlaybackState *xstate)
 {
@@ -6512,277 +6474,6 @@ SampleLoopWrapping
     return ProposedNewPosition;
 }
 
-XRNS_DLL_EXPORT int xrns_cue_section_by_name(XRNSPlaybackState *xstate, char *SectionName)
-{
-    int i;
-
-    if (!xstate) return XRNS_ERR_NULL_STATE;
-
-    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
-    {
-        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
-        if (Seq->bIsSectionStart
-            && Seq->SectionName
-            && SectionName
-            && !strcmp(SectionName, Seq->SectionName))
-        {
-            xstate->PatternHasBeenCued = 1;
-            xstate->CuedPatternIndex = i;
-        }
-    }
-
-    return XRNS_SUCCESS;
-}
-
-XRNS_DLL_EXPORT int xrns_cue_pattern_by_name(XRNSPlaybackState *xstate, char *PatternName)
-{
-    int i;
-
-    if (!xstate) return XRNS_ERR_NULL_STATE;
-    if (!PatternName) return XRNS_ERR_INVALID_TRACK_NAME;
-
-    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
-    {
-        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
-        xrns_pattern            *Pattern = &xstate->xdoc->PatternPool[Seq->PatternIdx];
-
-        if (Pattern->Name && !strcmp(PatternName, Pattern->Name))
-        {
-            xstate->PatternHasBeenCued = 1;
-            xstate->CuedPatternIndex = i;
-        }
-    }
-
-    return XRNS_SUCCESS;
-}
-
-XRNS_DLL_EXPORT void xrns_set_section_loop_by_name(XRNSPlaybackState *xstate, char *SectionName)
-{
-    int i, bFoundStart = 0;
-    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
-    {
-        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
-        if (Seq->bIsSectionStart
-            && Seq->SectionName
-            && SectionName)
-        {
-            if (!strcmp(SectionName, Seq->SectionName))
-            {
-                xstate->PatternSequenceLoopEnd = xstate->xdoc->PatternSequenceLength - 1;
-                xstate->PatternSequenceLoopStart = i;
-                bFoundStart = 1;
-            }
-            else if (bFoundStart)
-            {
-                xstate->PatternSequenceLoopEnd = i - 1;
-                break;
-            }
-        }
-    }
-}
-
-XRNS_DLL_EXPORT void xrns_set_section_loop_by_pattern_names(XRNSPlaybackState *xstate, char *StartName, char *EndName)
-{
-    if (!xstate) return;
-    if (!StartName) return;
-
-    if (!EndName) EndName = StartName;
-
-    int i, bFoundStart = 0;
-    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
-    {
-        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
-        xrns_pattern            *Pattern = &xstate->xdoc->PatternPool[Seq->PatternIdx];
-
-        if (Pattern->Name && !strcmp(StartName, Pattern->Name))
-        {
-            xstate->PatternSequenceLoopStart = i;
-        }
-
-        if (Pattern->Name && !strcmp(EndName, Pattern->Name))
-        {
-            xstate->PatternSequenceLoopEnd = i;
-        }
-    }
-}
-
-XRNS_DLL_EXPORT int32_t xrns_jump_to_pattern_by_name(XRNSPlaybackState *xstate, char *Name)
-{
-    if (!xstate) return XRNS_ERR_NULL_STATE;
-    if (!Name) return   XRNS_ERR_INVALID_INPUT_PARAM;
-
-    int i;
-
-    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
-    {
-        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
-        xrns_pattern            *Pattern = &xstate->xdoc->PatternPool[Seq->PatternIdx];
-
-        if (Pattern->Name && !strcmp(Name, Pattern->Name))
-        {
-            xstate->CurrentPatternIndex = i;
-            xstate->CurrentRow = 0;
-            xstate->CurrentTick = 0;
-            return XRNS_SUCCESS;
-        }
-    }
-
-    return XRNS_ERR_TRACK_NOT_FOUND;
-}
-
-XRNS_DLL_EXPORT void xrns_set_bpm_augmentation(XRNSPlaybackState *xstate, float BPMAugmentation)
-{
-    if (!xstate) return;
-    if (isnan(BPMAugmentation)) return;
-
-    if (BPMAugmentation < 1.0f)  BPMAugmentation = 1.0f;
-    if (BPMAugmentation > 500.0f) BPMAugmentation = 500.0f;
-
-    xstate->CurrentBPMAugmentation = BPMAugmentation;
-    RecomputeDurations(xstate);
-}
-
-XRNS_DLL_EXPORT void xrns_set_song_loop(XRNSPlaybackState *xstate, int bLoopSong)
-{
-    if (!xstate) return;
-    xstate->bStopAtEndOfSong = !!(bLoopSong);
-}
-
-XRNS_DLL_EXPORT void xrns_free_playback_state(XRNSPlaybackState *xstate)
-{
-    int h, j = 0;
-
-    FreePooledThreads(xstate->Workers);
-
-    /* free everything created by the FLAC decoder */
-    for (h = 0; h < xstate->xdoc->NumInstruments; h++)
-    {
-        xrns_instrument *Instrument = &xstate->xdoc->Instruments[h];
-        for (j = 0; j < Instrument->NumSamples; j++)
-        {
-            xrns_sample *Sample = &Instrument->Samples[j];
-            if (Sample->PCM && !Sample->bIsAlisedSample) ma_free(Sample->PCM, NULL);
-        }
-    }
-
-    /* free the galloc'd memory */
-    // VirtualFree(xstate->g->BaseAddress, 0, MEM_RELEASE);
-    free(xstate->g->BaseAddress);
-
-    /* free the galloc context itself */
-    free(xstate->g);
-
-    /* free the xrns_document */
-    free(xstate->xdoc);
-
-#ifdef INLCUDE_FLATBUFFER_INTERFACE
-    /* if we serialized stuff out, free that up now */
-    if (xstate->bSongHasBeenSerialized && xstate->SerializedSongMemory)
-    {
-        flatcc_builder_free(xstate->SerializedSongMemory);
-        //free(xstate->SerializedSongMemory);
-
-    }
-#endif
-    /* free output ring */
-    // free(xstate->Output);
-    FreeRingBuffer(&xstate->Output);
-
-    /* free the XRNSPlaybackState */
-    free(xstate);
-
-}
-
-XRNS_DLL_EXPORT int xrns_set_output_sample_rate(XRNSPlaybackState *xstate, float Fs)
-{
-    if (!xstate) return XRNS_ERR_NULL_STATE;
-
-    if (Fs < 8000.0f || Fs > 192000.0f)
-    {
-        return XRNS_ERR_INVALID_INPUT_PARAM;
-    }
-
-    xstate->OutputSampleRate  = Fs;
-    xstate->NumSamplesOfXFade = floor(Fs * XRNS_XFADE_MS / (1000.0));
-
-    return XRNS_SUCCESS;
-}
-
-void print_galloc_bytes_used(galloc_ctx *g);
-
-XRNS_DLL_EXPORT XRNSPlaybackState * xrns_create_playback_state_from_bytes(void *p_bytes, unsigned int num_bytes)
-{
-    TracyCZoneN(ctx, "Create Playback", 1);
-
-    pooled_threads_ctx *Workers = CreatePooledThreads(8);
-
-    galloc_ctx *galloc_context = malloc(sizeof(galloc_ctx));
-
-    if (!galloc_context)
-    {
-        return 0;
-    }
-
-    galloc_context->MaximumSizeBytes = Megabytes(8);
-    galloc_context->BaseAddress = malloc(galloc_context->MaximumSizeBytes);
-    memset(galloc_context->BaseAddress, 0, galloc_context->MaximumSizeBytes);
-
-    galloc_context->CurrentAddress = galloc_context->BaseAddress;
-
-    if (!galloc_context->BaseAddress)
-    {
-        return 0;
-    }
-
-    xrns_document *Master = malloc(sizeof(xrns_document));
-    memset(Master, 0, sizeof(xrns_document));
-
-    if (!populateXRNSDocument(galloc_context, p_bytes, (size_t) num_bytes, Master, Workers))
-    {
-        free(galloc_context->BaseAddress);
-        free(galloc_context);
-        free(Master);
-        return NULL;
-    }
-
-    XRNSPlaybackState *xplay = malloc(sizeof(XRNSPlaybackState));
-    memset(xplay, 0, sizeof(XRNSPlaybackState));
-
-    CreateXRNSPlaybackState(galloc_context, xplay, Master, 48000.0f);
-
-    xplay->Workers = Workers;
-    xplay->g = galloc_context;
-
-    TracyCZoneEnd(ctx);
-
-    unsigned long long BytesUsed = galloc_context->CurrentAddress - galloc_context->BaseAddress;
-
-    printf
-        ("GALLOC Using %llu Bytes (%.2f MBytes), the maximum is %.2f\n"
-        ,BytesUsed, BytesUsed / ((float) Megabytes(1))
-        ,galloc_context->MaximumSizeBytes / ((float) Megabytes(1))
-        );
-
-    if (BytesUsed > galloc_context->MaximumSizeBytes)
-    {
-        return NULL;
-    }   
-
-    return xplay;
-}
-
-XRNS_DLL_EXPORT XRNSPlaybackState * xrns_create_playback_state(char *p_filename)
-{
-    TracyCZoneN(ctx, "Create Playback From File", 1);
-    void *masterXRNS;
-    long masterXRNSSize;
-    masterXRNS = xrns_read_entire_file(p_filename, &masterXRNSSize);
-    XRNSPlaybackState *RetState = xrns_create_playback_state_from_bytes(masterXRNS, masterXRNSSize);
-    free(masterXRNS);
-    TracyCZoneEnd(ctx);
-    return RetState;
-}
-
 int run_engine
     (XRNSPlaybackState *xstate
     ,int                bExitingAfterTick
@@ -7788,12 +7479,283 @@ int run_engine
     return return_code;
 }
 
-/* DLL Functions
- * =============================================================================
- * =============================================================================
- * =============================================================================
- * =============================================================================
+/* ====================================================================================================================
+ * ====================================================================================================================
+ * ====================================================================================================================
+ * DLL Functions
+ * ====================================================================================================================
  */
+
+XRNS_DLL_EXPORT int xrns_cue_section_by_name(XRNSPlaybackState *xstate, char *SectionName)
+{
+    int i;
+
+    if (!xstate) return XRNS_ERR_NULL_STATE;
+
+    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
+    {
+        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
+        if (Seq->bIsSectionStart
+            && Seq->SectionName
+            && SectionName
+            && !strcmp(SectionName, Seq->SectionName))
+        {
+            xstate->PatternHasBeenCued = 1;
+            xstate->CuedPatternIndex = i;
+        }
+    }
+
+    return XRNS_SUCCESS;
+}
+
+XRNS_DLL_EXPORT int xrns_cue_pattern_by_name(XRNSPlaybackState *xstate, char *PatternName)
+{
+    int i;
+
+    if (!xstate) return XRNS_ERR_NULL_STATE;
+    if (!PatternName) return XRNS_ERR_INVALID_TRACK_NAME;
+
+    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
+    {
+        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
+        xrns_pattern            *Pattern = &xstate->xdoc->PatternPool[Seq->PatternIdx];
+
+        if (Pattern->Name && !strcmp(PatternName, Pattern->Name))
+        {
+            xstate->PatternHasBeenCued = 1;
+            xstate->CuedPatternIndex = i;
+        }
+    }
+
+    return XRNS_SUCCESS;
+}
+
+XRNS_DLL_EXPORT void xrns_set_section_loop_by_name(XRNSPlaybackState *xstate, char *SectionName)
+{
+    int i, bFoundStart = 0;
+    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
+    {
+        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
+        if (Seq->bIsSectionStart
+            && Seq->SectionName
+            && SectionName)
+        {
+            if (!strcmp(SectionName, Seq->SectionName))
+            {
+                xstate->PatternSequenceLoopEnd = xstate->xdoc->PatternSequenceLength - 1;
+                xstate->PatternSequenceLoopStart = i;
+                bFoundStart = 1;
+            }
+            else if (bFoundStart)
+            {
+                xstate->PatternSequenceLoopEnd = i - 1;
+                break;
+            }
+        }
+    }
+}
+
+XRNS_DLL_EXPORT void xrns_set_section_loop_by_pattern_names(XRNSPlaybackState *xstate, char *StartName, char *EndName)
+{
+    if (!xstate) return;
+    if (!StartName) return;
+
+    if (!EndName) EndName = StartName;
+
+    int i, bFoundStart = 0;
+    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
+    {
+        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
+        xrns_pattern            *Pattern = &xstate->xdoc->PatternPool[Seq->PatternIdx];
+
+        if (Pattern->Name && !strcmp(StartName, Pattern->Name))
+        {
+            xstate->PatternSequenceLoopStart = i;
+        }
+
+        if (Pattern->Name && !strcmp(EndName, Pattern->Name))
+        {
+            xstate->PatternSequenceLoopEnd = i;
+        }
+    }
+}
+
+XRNS_DLL_EXPORT int32_t xrns_jump_to_pattern_by_name(XRNSPlaybackState *xstate, char *Name)
+{
+    if (!xstate) return XRNS_ERR_NULL_STATE;
+    if (!Name) return   XRNS_ERR_INVALID_INPUT_PARAM;
+
+    int i;
+
+    for (i = 0; i < xstate->xdoc->PatternSequenceLength; i++)
+    {
+        xrns_pattern_sequence_entry *Seq = &xstate->xdoc->PatternSequence[i];
+        xrns_pattern            *Pattern = &xstate->xdoc->PatternPool[Seq->PatternIdx];
+
+        if (Pattern->Name && !strcmp(Name, Pattern->Name))
+        {
+            xstate->CurrentPatternIndex = i;
+            xstate->CurrentRow = 0;
+            xstate->CurrentTick = 0;
+            return XRNS_SUCCESS;
+        }
+    }
+
+    return XRNS_ERR_TRACK_NOT_FOUND;
+}
+
+XRNS_DLL_EXPORT void xrns_set_bpm_augmentation(XRNSPlaybackState *xstate, float BPMAugmentation)
+{
+    if (!xstate) return;
+    if (isnan(BPMAugmentation)) return;
+
+    if (BPMAugmentation < 1.0f)  BPMAugmentation = 1.0f;
+    if (BPMAugmentation > 500.0f) BPMAugmentation = 500.0f;
+
+    xstate->CurrentBPMAugmentation = BPMAugmentation;
+    RecomputeDurations(xstate);
+}
+
+XRNS_DLL_EXPORT void xrns_set_song_loop(XRNSPlaybackState *xstate, int bLoopSong)
+{
+    if (!xstate) return;
+    xstate->bStopAtEndOfSong = !!(bLoopSong);
+}
+
+XRNS_DLL_EXPORT void xrns_free_playback_state(XRNSPlaybackState *xstate)
+{
+    int h, j = 0;
+
+    FreePooledThreads(xstate->Workers);
+
+    /* free everything created by the FLAC decoder */
+    for (h = 0; h < xstate->xdoc->NumInstruments; h++)
+    {
+        xrns_instrument *Instrument = &xstate->xdoc->Instruments[h];
+        for (j = 0; j < Instrument->NumSamples; j++)
+        {
+            xrns_sample *Sample = &Instrument->Samples[j];
+            if (Sample->PCM && !Sample->bIsAlisedSample) ma_free(Sample->PCM, NULL);
+        }
+    }
+
+    /* free the galloc'd memory */
+    // VirtualFree(xstate->g->BaseAddress, 0, MEM_RELEASE);
+    free(xstate->g->BaseAddress);
+
+    /* free the galloc context itself */
+    free(xstate->g);
+
+    /* free the xrns_document */
+    free(xstate->xdoc);
+
+#ifdef INLCUDE_FLATBUFFER_INTERFACE
+    /* if we serialized stuff out, free that up now */
+    if (xstate->bSongHasBeenSerialized && xstate->SerializedSongMemory)
+    {
+        flatcc_builder_free(xstate->SerializedSongMemory);
+        //free(xstate->SerializedSongMemory);
+
+    }
+#endif
+    /* free output ring */
+    // free(xstate->Output);
+    FreeRingBuffer(&xstate->Output);
+
+    /* free the XRNSPlaybackState */
+    free(xstate);
+
+}
+
+XRNS_DLL_EXPORT int xrns_set_output_sample_rate(XRNSPlaybackState *xstate, float Fs)
+{
+    if (!xstate) return XRNS_ERR_NULL_STATE;
+
+    if (Fs < 8000.0f || Fs > 192000.0f)
+    {
+        return XRNS_ERR_INVALID_INPUT_PARAM;
+    }
+
+    xstate->OutputSampleRate  = Fs;
+    xstate->NumSamplesOfXFade = floor(Fs * XRNS_XFADE_MS / (1000.0));
+
+    return XRNS_SUCCESS;
+}
+
+void print_galloc_bytes_used(galloc_ctx *g);
+
+XRNS_DLL_EXPORT XRNSPlaybackState * xrns_create_playback_state_from_bytes(void *p_bytes, unsigned int num_bytes)
+{
+    TracyCZoneN(ctx, "Create Playback", 1);
+
+    pooled_threads_ctx *Workers = CreatePooledThreads(8);
+
+    galloc_ctx *galloc_context = malloc(sizeof(galloc_ctx));
+
+    if (!galloc_context)
+    {
+        return 0;
+    }
+
+    galloc_context->MaximumSizeBytes = Megabytes(8);
+    galloc_context->BaseAddress = malloc(galloc_context->MaximumSizeBytes);
+    memset(galloc_context->BaseAddress, 0, galloc_context->MaximumSizeBytes);
+
+    galloc_context->CurrentAddress = galloc_context->BaseAddress;
+
+    if (!galloc_context->BaseAddress)
+    {
+        return 0;
+    }
+
+    xrns_document *Master = malloc(sizeof(xrns_document));
+    memset(Master, 0, sizeof(xrns_document));
+
+    if (!populateXRNSDocument(galloc_context, p_bytes, (size_t) num_bytes, Master, Workers))
+    {
+        free(galloc_context->BaseAddress);
+        free(galloc_context);
+        free(Master);
+        return NULL;
+    }
+
+    XRNSPlaybackState *xplay = malloc(sizeof(XRNSPlaybackState));
+    memset(xplay, 0, sizeof(XRNSPlaybackState));
+
+    CreateXRNSPlaybackState(galloc_context, xplay, Master, 48000.0f);
+
+    xplay->Workers = Workers;
+    xplay->g = galloc_context;
+
+    TracyCZoneEnd(ctx);
+
+    unsigned long long BytesUsed = galloc_context->CurrentAddress - galloc_context->BaseAddress;
+
+    printf
+        ("GALLOC Using %llu Bytes (%.2f MBytes), the maximum is %.2f\n"
+        ,BytesUsed, BytesUsed / ((float) Megabytes(1))
+        ,galloc_context->MaximumSizeBytes / ((float) Megabytes(1))
+        );
+
+    if (BytesUsed > galloc_context->MaximumSizeBytes)
+    {
+        return NULL;
+    }   
+
+    return xplay;
+}
+
+XRNS_DLL_EXPORT XRNSPlaybackState * xrns_create_playback_state(char *p_filename)
+{
+    TracyCZoneN(ctx, "Create Playback From File", 1);
+    void *masterXRNS;
+    long masterXRNSSize;
+    masterXRNS = xrns_read_entire_file(p_filename, &masterXRNSSize);
+    XRNSPlaybackState *RetState = xrns_create_playback_state_from_bytes(masterXRNS, masterXRNSSize);
+    free(masterXRNS);
+    TracyCZoneEnd(ctx);
+    return RetState;
+}
 
 /* Returns an index greater than or equal to 0 on success, corresponding to the pattern index
  * of the pattern that will play on the next row. This index should be used to index the global
