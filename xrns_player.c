@@ -63,12 +63,6 @@
  */
 #include "miniz/miniz.c"
 
-// Outward interfacing.
-
-/* This affects how many samplers we can tell Unity about.
- */
-#define XRNS_ACTIVE_SAMPLER_COUNT (128)
-
 /* ====================================================================================================================
  * ====================================================================================================================
  * ====================================================================================================================
@@ -79,98 +73,102 @@
 /* Renoise defines this to be 12. Basically this is the polyphony limit for a single note column within a track. 
  * Because notes have a short fadeout time no matter what, even trivial XRNS files want this to be at least 2.
  */
-#define XRNS_MAX_SAMPLERS_PER_COLUMN         (12)
-#define XRNS_MAX_COLUMNS_PER_TRACK           (16)
-#define XRNS_MAX_NESTING_DEPTH                (6)
-#define XRNS_MAX_NAME                       (512)
-#define XRNS_MAX_NUM_INSTRUMENTS            (255)
-#define XRNS_MAX_NUM_TRACKS                 (255)
-#define XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING  (12)
+#define XRNS_MAX_SAMPLERS_PER_COLUMN   (12)
+#define XRNS_MAX_COLUMNS_PER_TRACK     (16)
+#define XRNS_MAX_NESTING_DEPTH         (6)
+#define XRNS_MAX_NAME                  (512)
+#define XRNS_MAX_NUM_INSTRUMENTS       (255)
+#define XRNS_MAX_NUM_TRACKS            (255)
+#define XRNS_MAX_SAMPLES_PLAYING       (12)
 
-#define XRNS_XFADE_MS (1)
+/* This affects how many samplers we can tell the caller about.
+ */
+#define XRNS_ACTIVE_SAMPLER_COUNT      (128)
 
-#define XRNS_NOTE_BLANK  (0xFF)
-#define XRNS_NOTE_OFF    (0xFE)
-#define XRNS_NOTE_EFFECT (0xFD)
-#define XRNS_NOTE_REAL   (0xFC)
+#define XRNS_XFADE_MS                  (1)
 
-#define XRNS_MISSING_VALUE (0xFFFF)
+#define XRNS_NOTE_BLANK                (0xFF)
+#define XRNS_NOTE_OFF                  (0xFE)
+#define XRNS_NOTE_EFFECT               (0xFD)
+#define XRNS_NOTE_REAL                 (0xFC)
 
-#define XRNS_EFFECT_FILTER (0)
-#define XRNS_EFFECT_REVERB (1)
+#define XRNS_MISSING_VALUE             (0xFFFF)
 
-#define XRNS_STORED_EFFECT_DU  (0)
-#define XRNS_STORED_EFFECT_IO  (1)
-#define XRNS_STORED_EFFECT_xG  (2)
-#define XRNS_STORED_EFFECT_xV  (3)
-#define XRNS_STORED_EFFECT_xT  (4)
-#define XRNS_STORED_EFFECT_xN  (5)
-#define XRNS_STORED_EFFECT_VOL (6)
-#define XRNS_STORED_EFFECT_PAN (7)
-#define XRNS_STORED_EFFECT_NUM (8)
+#define XRNS_EFFECT_FILTER             (0)
+#define XRNS_EFFECT_REVERB             (1)
 
-#define XRNS_INTERPOLATION_NONE   (0)
-#define XRNS_INTERPOLATION_LINEAR (1)
-#define XRNS_INTERPOLATION_CUBIC  (2)
+#define XRNS_STORED_EFFECT_DU          (0)
+#define XRNS_STORED_EFFECT_IO          (1)
+#define XRNS_STORED_EFFECT_xG          (2)
+#define XRNS_STORED_EFFECT_xV          (3)
+#define XRNS_STORED_EFFECT_xT          (4)
+#define XRNS_STORED_EFFECT_xN          (5)
+#define XRNS_STORED_EFFECT_VOL         (6)
+#define XRNS_STORED_EFFECT_PAN         (7)
+#define XRNS_STORED_EFFECT_NUM         (8)
 
-#define XRNS_LOOP_MODE_OFF        (0)
-#define XRNS_LOOP_MODE_FORWARD    (1)
-#define XRNS_LOOP_MODE_BACKWARD   (2)
-#define XRNS_LOOP_MODE_PINGPONG   (3)
+#define XRNS_INTERPOLATION_NONE        (0)
+#define XRNS_INTERPOLATION_LINEAR      (1)
+#define XRNS_INTERPOLATION_CUBIC       (2)
+            
+#define XRNS_LOOP_MODE_OFF             (0)
+#define XRNS_LOOP_MODE_FORWARD         (1)
+#define XRNS_LOOP_MODE_BACKWARD        (2)
+#define XRNS_LOOP_MODE_PINGPONG        (3)
 
-#define XRNS_FORWARD              (0)
-#define XRNS_BACKWARD             (1)
+#define XRNS_FORWARD                   (0)
+#define XRNS_BACKWARD                  (1)
 
-#define XRNS_NNA_CUT      (0)
-#define XRNS_NNA_NOTEOFF  (1)
-#define XRNS_NNA_CONTINUE (2)
+#define XRNS_NNA_CUT                   (0)
+#define XRNS_NNA_NOTEOFF               (1)
+#define XRNS_NNA_CONTINUE              (2)
 
-#define XRNS_CURVE_TYPE_POINTS (0)
-#define XRNS_CURVE_TYPE_LINES  (1)
-#define XRNS_CURVE_TYPE_CURVES (2)
+#define XRNS_CURVE_TYPE_POINTS         (0)
+#define XRNS_CURVE_TYPE_LINES          (1)
+#define XRNS_CURVE_TYPE_CURVES         (2)
 
-#define XRNS_ENVELOPE_UNITS_BEATS (0)
-#define XRNS_ENVELOPE_UNITS_MS    (1)
-#define XRNS_ENVELOPE_UNITS_LINES (2)
+#define XRNS_ENVELOPE_UNITS_BEATS      (0)
+#define XRNS_ENVELOPE_UNITS_MS         (1)
+#define XRNS_ENVELOPE_UNITS_LINES      (2)
 
 #define XRNS_MODULATION_TARGET_VOLUME  (0)
 #define XRNS_MODULATION_TARGET_PANNING (1)
 #define XRNS_MODULATION_TARGET_PITCH   (2)
 
-#define XRNS_UNIPOLAR (0)
-#define XRNS_BIPOLAR  (1)
+#define XRNS_UNIPOLAR                  (0)
+#define XRNS_BIPOLAR                   (1)
 
-#define EFFECT_ID_0D     (0)
-#define EFFECT_ID_0U     (1)
-#define EFFECT_ID_0V     (2)
-#define EFFECT_ID_0A     (3)
-#define EFFECT_ID_0G     (4)
-#define EFFECT_ID_0I     (5)
-#define EFFECT_ID_0O     (6)
-#define EFFECT_ID_0T     (7)
-#define EFFECT_ID_0C     (8)
-#define EFFECT_ID_0M     (9)
-#define EFFECT_ID_0L    (10)
-#define EFFECT_ID_0S    (11)
-#define EFFECT_ID_0B    (12)
-#define EFFECT_ID_0E    (13)
-#define EFFECT_ID_0Q    (14)
-#define EFFECT_ID_0R    (15)
-#define EFFECT_ID_0Y    (16)
-#define EFFECT_ID_0N    (17)
-#define EFFECT_ID_0P    (18)
-#define EFFECT_ID_0W    (19)
-#define EFFECT_ID_0X    (20)
-#define EFFECT_ID_0Z    (21)
-#define EFFECT_ID_0J    (22)
-#define EFFECT_ID_ZT    (23)
-#define EFFECT_ID_ZL    (24)
-#define EFFECT_ID_ZK    (25)
-#define EFFECT_ID_ZG    (26)
-#define EFFECT_ID_ZB    (27)
-#define EFFECT_ID_ZD    (28)
-#define EFFECT_ID_0K    (29)
-#define EFFECT_ID_COUNT (30)
+#define EFFECT_ID_0D                   (0)
+#define EFFECT_ID_0U                   (1)
+#define EFFECT_ID_0V                   (2)
+#define EFFECT_ID_0A                   (3)
+#define EFFECT_ID_0G                   (4)
+#define EFFECT_ID_0I                   (5)
+#define EFFECT_ID_0O                   (6)
+#define EFFECT_ID_0T                   (7)
+#define EFFECT_ID_0C                   (8)
+#define EFFECT_ID_0M                   (9)
+#define EFFECT_ID_0L                   (10)
+#define EFFECT_ID_0S                   (11)
+#define EFFECT_ID_0B                   (12)
+#define EFFECT_ID_0E                   (13)
+#define EFFECT_ID_0Q                   (14)
+#define EFFECT_ID_0R                   (15)
+#define EFFECT_ID_0Y                   (16)
+#define EFFECT_ID_0N                   (17)
+#define EFFECT_ID_0P                   (18)
+#define EFFECT_ID_0W                   (19)
+#define EFFECT_ID_0X                   (20)
+#define EFFECT_ID_0Z                   (21)
+#define EFFECT_ID_0J                   (22)
+#define EFFECT_ID_ZT                   (23)
+#define EFFECT_ID_ZL                   (24)
+#define EFFECT_ID_ZK                   (25)
+#define EFFECT_ID_ZG                   (26)
+#define EFFECT_ID_ZB                   (27)
+#define EFFECT_ID_ZD                   (28)
+#define EFFECT_ID_0K                   (29)
+#define EFFECT_ID_COUNT                (30)
 
 #define Kilobytes(_amount) (_amount * 1024L)
 #define Megabytes(_amount) (Kilobytes(_amount) * 1024L)
@@ -3700,7 +3698,7 @@ typedef struct
 typedef struct
 {
     xrns_sample_playback_state
-        PlaybackStates[XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING];
+        PlaybackStates[XRNS_MAX_SAMPLES_PLAYING];
 
     char         Active;
     char         bPlaying;
@@ -4003,7 +4001,7 @@ void InitialiseSampler(xrns_sampler *Sampler)
     Sampler->bCxKill             =  0;
     Sampler->BxxValue            = -1;
     Sampler->SxxValue            = -1;
-    for (int j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+    for (int j = 0; j < XRNS_MAX_SAMPLES_PLAYING; j++)
     {
         xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
         PlaybackState->CurrentSample  = -1;
@@ -4551,7 +4549,7 @@ void PerformNewNoteActionOnSamplerBank
 
         if (!Sampler->Active) continue;
 
-        for (j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+        for (j = 0; j < XRNS_MAX_SAMPLES_PLAYING; j++)
         {
             xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
 
@@ -4843,7 +4841,7 @@ void SamplerBlankTriggerNewNote(XRNSPlaybackState *xstate,
                 Sampler->bStillOnHomeRow   = 1;
                 Sampler->TremoloAmount     = 1.0f;
 
-                j = (j + 1) % XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING;
+                j = (j + 1) % XRNS_MAX_SAMPLES_PLAYING;
             }
         }
 
@@ -5170,7 +5168,7 @@ void xrns_perform_tick_processing(XRNSPlaybackState *xstate)
                 {
                     if (Sampler->bCxKill && (xstate->CurrentTick == Sampler->CxOffset))
                     {
-                        for (int j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+                        for (int j = 0; j < XRNS_MAX_SAMPLES_PLAYING; j++)
                         {
                             xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
                             if (PlaybackState->bIsCrossFading) continue;
@@ -5392,7 +5390,7 @@ void FinaliseEffectCommands(XRNSPlaybackState *xstate, int track_idx)
             {
                 if (Sampler->bCxKill && Sampler->CxOffset == 0)
                 {
-                    for (j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+                    for (j = 0; j < XRNS_MAX_SAMPLES_PLAYING; j++)
                     {
                         xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
                         if (Sampler->bStillOnHomeRow)
@@ -5411,7 +5409,7 @@ void FinaliseEffectCommands(XRNSPlaybackState *xstate, int track_idx)
             }
 
             /* determine a new playback position, playback bounds, and playback direction */
-            for (j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+            for (j = 0; j < XRNS_MAX_SAMPLES_PLAYING; j++)
             {
                 xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
 
@@ -5449,7 +5447,7 @@ void FinaliseEffectCommands(XRNSPlaybackState *xstate, int track_idx)
             }
 
             xrns_instrument *Instrument = &xstate->xdoc->Instruments[Sampler->CurrentInstrument];
-            for (j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+            for (j = 0; j < XRNS_MAX_SAMPLES_PLAYING; j++)
             {
                 xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
 
@@ -6733,7 +6731,7 @@ int run_engine
                                 {
                                     Sampler->Active   = 1;
                                     Sampler->bPlaying = (!Sampler->bIsNoteOff);
-                                    for (int j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+                                    for (int j = 0; j < XRNS_MAX_SAMPLES_PLAYING; j++)
                                     {
                                         xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
                                         if (PlaybackState->bMapped)
@@ -6752,7 +6750,7 @@ int run_engine
                     if (!Sampler->bPlaying) continue;
 
                     int j;
-                    for (j = 0; j < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; j++)
+                    for (j = 0; j < XRNS_MAX_SAMPLES_PLAYING; j++)
                     {
                         xrns_sample_playback_state *PlaybackState = &Sampler->PlaybackStates[j];
                         if (!PlaybackState->bPlaying) continue;
@@ -7259,7 +7257,7 @@ int run_engine
                         }
 
                         int bAllDone = 1;
-                        for (int jj = 0; jj < XRNS_MAX_INSTRUMENT_SAMPLES_PLAYING; jj++)
+                        for (int jj = 0; jj < XRNS_MAX_SAMPLES_PLAYING; jj++)
                         {
                             if (Sampler->PlaybackStates[jj].bPlaying || Sampler->PlaybackStates[jj].Active)
                                 bAllDone = 0;
