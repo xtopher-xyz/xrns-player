@@ -7951,7 +7951,7 @@ XRNS_DLL_EXPORT int32_t xrns_set_track_volume_by_name(XRNSPlaybackState *xstate,
  * XRNS_ERR_NULL_STATE
  * XRNS_ERR_OUT_OF_SAMPLES
  */
-XRNS_DLL_EXPORT int32_t xrns_produce_samples(XRNSPlaybackState *xstate, unsigned int num_samples, float *p_samples)
+XRNS_DLL_EXPORT int xrns_produce_samples(XRNSPlaybackState *xstate, unsigned int num_samples, float *p_samples)
 {
     if (!xstate) return XRNS_ERR_NULL_STATE;
 
@@ -8362,32 +8362,3 @@ XRNS_DLL_EXPORT uint32_t xrns_prepare_song_serialized(XRNSPlaybackState *xstate)
     return (uint32_t) xstate->SerializedSongLengthInBytes;
 }
 #endif
-
-void xrns_produce_samples_int16(XRNSPlaybackState *xstate, unsigned int num_samples, char *p_samples)
-{
-    int i;
-    float *dumb = malloc(num_samples * 2 * sizeof(float));
-    
-    int samples_produced = 0;
-    int blk = 1024;
-    while (samples_produced < num_samples)
-    {
-        int samples_to_produce = num_samples - samples_produced;
-        if (samples_to_produce > blk)
-            samples_to_produce = blk;
-
-        TracyCFrameMark;
-        run_engine(xstate, 0, 0, 0, samples_to_produce);
-        int samples_available = xrns_query_available_samples(xstate);
-        xrns_produce_samples(xstate, samples_available, dumb + 2*samples_produced);
-        xrns_done_producing_samples(xstate, samples_available);
-        samples_produced += samples_available;
-    }
-
-    for (i = 0; i < num_samples * 2; i++)
-    {
-        ((int16_t*)p_samples)[i] = (int16_t) (32768 * dumb[i]);
-    }
-
-    free(dumb);
-}
